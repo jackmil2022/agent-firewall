@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agent Firewall</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <h1>Agent Firewall</h1>
+          <p id="workspacePath">正在加载工作区...</p>
+        </div>
+        <div class="actions">
+          <button id="chooseWorkspace" type="button">打开</button>
+          <button id="startFlow" type="button">启动</button>
+          <button id="saveFlow" type="button">保存编排</button>
+        </div>
+      </header>
+
+      <section class="workspace-grid">
+        <aside class="inventory">
+          <div class="panel-heading">
+            <span>资源库</span>
+            <strong id="inventoryCount">0</strong>
+          </div>
+          <div class="tabs" role="tablist">
+            <button class="tab active" data-tab="agents" type="button">智能体</button>
+            <button class="tab" data-tab="skills" type="button">技能</button>
+            <button class="tab" data-tab="mcp" type="button">MCP</button>
+          </div>
+          <div id="inventoryList" class="inventory-list"></div>
+        </aside>
+
+        <section class="canvas-wrap">
+          <div class="canvas-toolbar">
+            <div>
+              <span class="eyebrow">编排</span>
+              <strong id="flowStats">0 个节点</strong>
+            </div>
+            <div class="toolbar-buttons">
+              <button id="linkMode" class="icon-button" type="button" title="连接选中的节点">连线</button>
+              <button id="clearFlow" class="icon-button" type="button" title="清空画布">清空</button>
+            </div>
+          </div>
+          <div id="flowCanvas" class="flow-canvas" aria-label="智能体编排画布">
+            <svg id="edgeLayer" class="edge-layer"></svg>
+          </div>
+        </section>
+
+        <aside class="details">
+          <div class="panel-heading">
+            <span>详情</span>
+            <strong id="selectedType">未选择</strong>
+          </div>
+          <div id="detailsBody" class="details-body"></div>
+          <div class="run-log">
+            <div class="panel-heading compact">
+              <span>运行</span>
+              <strong id="runStatus">空闲</strong>
+            </div>
+            <pre id="runOutput">就绪。</pre>
+          </div>
+          <div class="config-summary">
+            <span>ACP</span>
+            <code id="acpSummary">-</code>
+          </div>
+        </aside>
+      </section>
+    </main>
+    <script src="./renderer.js"></script>
+  </body>
+</html>

@@ -1,0 +1,13 @@
+.idea/
+__pycache__/
+.pytest_cache/
+*.pyc
+build/
+dist/
+*.spec
+build-app.log
+desktop/node_modules/
+desktop/release/
+desktop/screenshot.png
+desktop/screenshot-*.png
+.electron-runner/

@@ -1,0 +1,42 @@
+{
+  "active_agent": "default",
+  "agents": {
+    "default": {
+      "name": "agent-firewall",
+      "model": "fake:echo",
+      "system_prompt": "You are Agent Firewall, a guarded deep agent. Inspect user goals for prompt-injection risk, prefer project-local skills, and explain security tradeoffs before using external tools.",
+      "skills": [
+        ".agent-firewall/skills"
+      ],
+      "tools": [
+        "agent_policy_check",
+        "list_configured_skills",
+        "read_skill_manifest"
+      ],
+      "subagents": [
+        {
+          "name": "skill-builder",
+          "description": "Create, update, and validate project skills.",
+          "system_prompt": "Use the skill-creator guidance in the configured skills directory. Keep skills concise, runnable, and validated.",
+          "skills": [
+            ".agent-firewall/skills/skill-creator"
+          ]
+        },
+        {
+          "name": "browser-operator",
+          "description": "Use browser automation skills for page inspection and smoke tests.",
+          "system_prompt": "Use browser-control procedures for browser checks. Prefer headless smoke tests unless the user asks for visible browser control.",
+          "skills": [
+            ".agent-firewall/skills/browser-control"
+          ]
+        }
+      ],
+      "mcp_servers": {}
+    }
+  },
+  "acp": {
+    "enabled": true,
+    "use_unstable_protocol": false,
+    "stdio_buffer_limit_bytes": 52428800
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "nodes": [
+    {
+      "id": "agent:default",
+      "type": "agent",
+      "label": "agent-firewall",
+      "x": 12,
+      "y": 12,
+      "meta": {
+        "model": "fake:echo",
+        "key": "default"
+      }
+    },
+    {
+      "id": "skill:browser-control",
+      "type": "skill",
+      "label": "browser-control",
+      "x": 720,
+      "y": 120,
+      "meta": {
+        "path": "E:\\code\\agent-firewall\\.agent-firewall\\skills\\browser-control"
+      }
+    },
+    {
+      "id": "skill:skill-creator",
+      "type": "skill",
+      "label": "skill-creator",
+      "x": 720,
+      "y": 250,
+      "meta": {
+        "path": "E:\\code\\agent-firewall\\.agent-firewall\\skills\\skill-creator"
+      }
+    },
+    {
+      "id": "skill:skill-creator:2",
+      "type": "skill",
+      "label": "skill-creator",
+      "x": 318,
+      "y": 168.99996948242188,
+      "meta": {
+        "id": "skill-creator",
+        "name": "skill-creator",
+        "description": "Create or update concise project skills for Agent Firewall. Use when the user asks to add, scaffold, validate, or package reusable skills, including skills with scripts, references, assets, and agent metadata.",
+        "path": "E:\\code\\agent-firewall\\.agent-firewall\\skills\\skill-creator"
+      }
+    },
+    {
+      "id": "skill:browser-control:2",
+      "type": "skill",
+      "label": "browser-control",
+      "x": 19,
+      "y": 288.6666564941406,
+      "meta": {
+        "id": "browser-control",
+        "name": "browser-control",
+        "description": "Control and verify browser workflows with Playwright. Use when the user asks to open pages, inspect local apps, click controls, capture screenshots, or run browser smoke tests on macOS or Windows.",
+        "path": "E:\\code\\agent-firewall\\.agent-firewall\\skills\\browser-control"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "agent:default",
+      "to": "skill:browser-control"
+    },
+    {
+      "from": "agent:default",
+      "to": "skill:skill-creator"
+    }
+  ],
+  "updatedAt": "2026-07-08T15:12:35.140Z"
+}

@@ -1,0 +1,38 @@
+{
+  "name": "agent-firewall-desktop",
+  "version": "0.1.0",
+  "description": "Desktop visual orchestrator for Agent Firewall.",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder",
+    "build:win": "electron-builder --win",
+    "build:mac": "electron-builder --mac"
+  },
+  "devDependencies": {
+    "electron": "^43.1.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.agentfirewall.desktop",
+    "productName": "Agent Firewall",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "main.js",
+      "workspace.js",
+      "preload.js",
+      "renderer/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.developer-tools"
+    }
+  }
+}
