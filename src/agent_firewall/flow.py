@@ -76,6 +76,7 @@ class FlowSpec:
 
     @classmethod
     def from_mapping(cls, data: dict[str, Any]) -> "FlowSpec":
+        data = ensure_boundary_nodes(data)
         nodes = [FlowNode.from_mapping(item) for item in data.get("nodes", [])]
         edges = [FlowEdge.from_mapping(item) for item in data.get("edges", [])]
         if not nodes:
@@ -186,11 +187,65 @@ def default_flow(config: AgentFirewallConfig) -> dict[str, Any]:
             }
         )
         edges.append({"from": f"agent:{config.active_agent}", "to": node_id, "on": "success"})
-    return {
+    return ensure_boundary_nodes({
         "nodes": nodes,
         "edges": edges,
         "limits": {"max_steps": 20, "max_loop_iterations": 3},
-    }
+    })
+
+
+def ensure_boundary_nodes(data: dict[str, Any]) -> dict[str, Any]:
+    nodes = [dict(item) for item in data.get("nodes", [])]
+    edges = [dict(item) for item in data.get("edges", [])]
+    node_ids = {str(node.get("id")) for node in nodes}
+    if not nodes:
+        return data
+
+    if "start" not in node_ids:
+        starts = _flow_start_ids(nodes, edges)
+        start_x, start_y = _boundary_position(nodes, starts, side="start")
+        nodes.insert(0, {"id": "start", "type": "start", "label": "开始", "x": start_x, "y": start_y})
+        edges.extend({"from": "start", "to": node_id, "on": "success"} for node_id in starts)
+        node_ids.add("start")
+
+    if "end" not in node_ids:
+        leaves = _flow_leaf_ids(nodes, edges)
+        end_x, end_y = _boundary_position(nodes, leaves, side="end")
+        nodes.append({"id": "end", "type": "end", "label": "结束", "x": end_x, "y": end_y})
+        edges.extend({"from": node_id, "to": "end", "on": "success"} for node_id in leaves if node_id != "start")
+
+    return {**data, "nodes": nodes, "edges": _dedupe_edges(edges)}
+
+
+def _flow_start_ids(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> list[str]:
+    targets = {str(edge.get("to") or edge.get("to_node")) for edge in edges}
+    return [str(node["id"]) for node in nodes if str(node.get("id")) not in targets and str(node.get("id")) != "end"]
+
+
+def _flow_leaf_ids(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> list[str]:
+    sources = {str(edge.get("from") or edge.get("from_node")) for edge in edges}
+    return [str(node["id"]) for node in nodes if str(node.get("id")) not in sources and str(node.get("id")) != "end"]
+
+
+def _dedupe_edges(edges: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for edge in edges:
+        key = (str(edge.get("from") or edge.get("from_node")), str(edge.get("to") or edge.get("to_node")), str(edge.get("on") or "success"))
+        if key not in seen:
+            seen.add(key)
+            result.append(edge)
+    return result
+
+
+def _boundary_position(nodes: list[dict[str, Any]], anchor_ids: list[str], *, side: str) -> tuple[int, int]:
+    anchors = [node for node in nodes if str(node.get("id")) in set(anchor_ids)] or nodes
+    xs = [int(node.get("x") or 360) for node in nodes]
+    ys = [int(node.get("y") or 220) for node in anchors]
+    y = int(sum(ys) / len(ys)) if ys else 220
+    if side == "start":
+        return max(40, min(xs) - 320), y
+    return max(xs) + 340, y
 
 
 def _legacy_ref(node_id: str, node_type: str, meta: dict[str, Any]) -> str:

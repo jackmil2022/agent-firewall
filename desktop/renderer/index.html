@@ -37,10 +37,13 @@
             <strong id="inventoryCount">0</strong>
           </div>
           <div class="tabs" role="tablist">
-            <button class="tab active" data-tab="agents" type="button">智能体</button>
-            <button class="tab" data-tab="models" type="button">模型</button>
+            <button class="tab" data-tab="agents" type="button">智能体</button>
+            <button class="tab active" data-tab="models" type="button">模型</button>
             <button class="tab" data-tab="skills" type="button">技能</button>
             <button class="tab" data-tab="mcp" type="button">MCP</button>
+          </div>
+          <div class="inventory-search">
+            <input id="inventorySearch" type="search" placeholder="搜索资源..." />
           </div>
           <div id="inventoryList" class="inventory-list"></div>
         </aside>
@@ -52,6 +55,9 @@
               <strong id="flowStats">0 个节点</strong>
             </div>
             <div class="toolbar-buttons">
+              <button id="zoomOut" class="icon-button" type="button" title="缩小">-</button>
+              <button id="zoomReset" class="icon-button" type="button" title="重置缩放">100%</button>
+              <button id="zoomIn" class="icon-button" type="button" title="放大">+</button>
               <button id="linkMode" class="icon-button" type="button" title="一键全览">全览</button>
               <button id="clearFlow" class="icon-button" type="button" title="清空画布">清空</button>
             </div>

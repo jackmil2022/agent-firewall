@@ -1,12 +1,14 @@
 const state = {
   workspace: null,
   data: null,
-  activeTab: "agents",
+  activeTab: "models",
+  inventoryQuery: "",
   selectedNodeId: null,
   editor: null,
   renderingFlow: false,
   activeView: "flow",
-  selectedModelKey: ""
+  selectedModelKey: "",
+  canvasPan: null
 };
 
 const els = {
@@ -14,6 +16,7 @@ const els = {
   modelView: document.querySelector("#modelView"),
   workspacePath: document.querySelector("#workspacePath"),
   inventoryCount: document.querySelector("#inventoryCount"),
+  inventorySearch: document.querySelector("#inventorySearch"),
   inventoryList: document.querySelector("#inventoryList"),
   flowCanvas: document.querySelector("#flowCanvas"),
   flowStats: document.querySelector("#flowStats"),
@@ -27,6 +30,9 @@ const els = {
   reloadConfig: document.querySelector("#reloadConfig"),
   clearFlow: document.querySelector("#clearFlow"),
   linkMode: document.querySelector("#linkMode"),
+  zoomOut: document.querySelector("#zoomOut"),
+  zoomReset: document.querySelector("#zoomReset"),
+  zoomIn: document.querySelector("#zoomIn"),
   runStatus: document.querySelector("#runStatus"),
   runOutput: document.querySelector("#runOutput"),
   activeAgentSelect: document.querySelector("#activeAgentSelect"),
@@ -82,6 +88,11 @@ function wireEvents() {
     await saveFlow("manual");
   });
 
+  els.inventorySearch.addEventListener("input", () => {
+    state.inventoryQuery = els.inventorySearch.value.trim().toLowerCase();
+    renderInventory();
+  });
+
   els.reloadConfig.addEventListener("click", async () => {
     await loadWorkspace();
     els.modelStatus.textContent = "已重新加载。";
@@ -114,8 +125,15 @@ function wireEvents() {
   });
 
   els.clearFlow.addEventListener("click", () => {
-    state.data.flow = { nodes: [], edges: [], updatedAt: new Date().toISOString() };
-    state.selectedNodeId = null;
+    state.data.flow = {
+      nodes: [
+        { id: "start", type: "start", label: "开始", x: 80, y: 220 },
+        { id: "end", type: "end", label: "结束", x: 980, y: 360 }
+      ],
+      edges: [{ from: "start", to: "end", on: "success" }],
+      updatedAt: new Date().toISOString()
+    };
+    state.selectedNodeId = "start";
     renderCanvas({ fit: true });
     renderDetails();
     scheduleAutosave();
@@ -124,6 +142,10 @@ function wireEvents() {
   els.linkMode.addEventListener("click", () => {
     fitEditorView();
   });
+
+  els.zoomOut.addEventListener("click", () => state.editor?.zoom_out());
+  els.zoomReset.addEventListener("click", () => state.editor?.zoom_reset());
+  els.zoomIn.addEventListener("click", () => state.editor?.zoom_in());
 
   els.flowCanvas.addEventListener("dragover", (event) => event.preventDefault());
   els.flowCanvas.addEventListener("drop", (event) => {
@@ -184,6 +206,39 @@ function initFlowEditor() {
     syncFlowFromEditor(true);
     renderCanvas();
   });
+  wireCanvasPan();
+}
+
+function wireCanvasPan() {
+  els.flowCanvas.addEventListener("mousedown", (event) => {
+    if (event.button !== 0 || isCanvasControlTarget(event.target)) return;
+    const editor = state.editor;
+    if (!editor) return;
+    state.canvasPan = {
+      x: event.clientX,
+      y: event.clientY,
+      canvasX: editor.canvas_x,
+      canvasY: editor.canvas_y
+    };
+    editor.editor_selected = false;
+    els.flowCanvas.classList.add("panning");
+    event.preventDefault();
+  });
+  window.addEventListener("mousemove", (event) => {
+    if (!state.canvasPan || !state.editor) return;
+    const dx = event.clientX - state.canvasPan.x;
+    const dy = event.clientY - state.canvasPan.y;
+    setEditorView(state.canvasPan.canvasX + dx, state.canvasPan.canvasY + dy, state.editor.zoom);
+  });
+  window.addEventListener("mouseup", () => {
+    if (!state.canvasPan) return;
+    state.canvasPan = null;
+    els.flowCanvas.classList.remove("panning");
+  });
+}
+
+function isCanvasControlTarget(target) {
+  return Boolean(target.closest(".drawflow-node, .input, .output, .main-path, .point, .drawflow-delete, .canvas-actionbar"));
 }
 
 function canvasPointFromEvent(event) {
@@ -315,7 +370,7 @@ function inventoryItems() {
 }
 
 function renderInventory() {
-  const items = inventoryItems();
+  const items = filterInventoryItems(inventoryItems());
   els.inventoryCount.textContent = String(items.length);
   els.inventoryList.innerHTML = "";
   if (items.length === 0) {
@@ -341,6 +396,15 @@ function renderInventory() {
     }
     els.inventoryList.appendChild(card);
   });
+}
+
+function filterInventoryItems(items) {
+  if (!state.inventoryQuery) return items;
+  return items.filter((item) =>
+    [item.label, item.subtitle, item.description, item.id]
+      .filter(Boolean)
+      .some((value) => String(value).toLowerCase().includes(state.inventoryQuery))
+  );
 }
 
 function addAssetNode(asset, x, y) {
@@ -385,10 +449,11 @@ function addEditorNode(node) {
   const editor = state.editor;
   if (!editor) return null;
   const before = new Set(Object.keys(editor.drawflow.drawflow.Home.data));
+  const ports = nodePorts(node.type);
   editor.addNode(
     node.type,
-    1,
-    1,
+    ports.inputs,
+    ports.outputs,
     Math.max(12, Number(node.x) || 12),
     Math.max(12, Number(node.y) || 12),
     node.type,
@@ -403,6 +468,12 @@ function addEditorNode(node) {
     nodeHtml(node)
   );
   return Object.keys(editor.drawflow.drawflow.Home.data).find((id) => !before.has(id)) || null;
+}
+
+function nodePorts(type) {
+  if (type === "start") return { inputs: 0, outputs: 1 };
+  if (type === "end") return { inputs: 1, outputs: 0 };
+  return { inputs: 1, outputs: 1 };
 }
 
 function selectEditorNode(flowId) {
@@ -459,6 +530,14 @@ function flowFromEditor() {
 }
 
 function nodeHtml(node) {
+  if (node.type === "start" || node.type === "end") {
+    return `
+      <div class="flow-node-card boundary-node-card">
+        <span class="pill ${node.type}">${translateType(node.type)}</span>
+        <h3>${escapeHtml(node.label)}</h3>
+      </div>
+    `;
+  }
   return `
     <div class="flow-node-card">
       <span class="pill ${node.type}">${translateType(node.type)}</span>
@@ -780,6 +859,8 @@ function translateStatus(status) {
 function translateType(type) {
   const map = {
     agent: "智能体",
+    start: "开始",
+    end: "结束",
     skill: "技能",
     model: "模型",
     mcp: "MCP"

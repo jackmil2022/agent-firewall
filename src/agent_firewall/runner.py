@@ -90,6 +90,8 @@ def run_flow(
 
 
 def _run_node(config: AgentFirewallConfig, node: FlowNode, packet: TaskPacket) -> StepResult:
+    if node.type in ("start", "end"):
+        return _run_boundary_node(node, packet)
     if node.type == "agent":
         return _run_agent_node(config, node, packet)
     if node.type == "skill":
@@ -97,6 +99,11 @@ def _run_node(config: AgentFirewallConfig, node: FlowNode, packet: TaskPacket) -
     if node.type == "mcp":
         return _run_mcp_node(config, node)
     return StepResult(status="failed", summary=f"unknown node type: {node.type}")
+
+
+def _run_boundary_node(node: FlowNode, packet: TaskPacket) -> StepResult:
+    summary = "flow started" if node.type == "start" else "flow finished"
+    return StepResult(status="success", summary=summary, handoff={"next_input": packet.prompt()})
 
 
 def _run_agent_node(config: AgentFirewallConfig, node: FlowNode, packet: TaskPacket) -> StepResult:

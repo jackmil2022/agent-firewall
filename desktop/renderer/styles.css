@@ -199,7 +199,7 @@ h1 {
   border: 1px solid var(--line);
   border-radius: 18px;
   display: grid;
-  grid-template-rows: auto auto 1fr;
+  grid-template-rows: auto auto auto 1fr;
   box-shadow: var(--shadow), inset 0 1px 0 rgba(255, 255, 255, 0.05);
   backdrop-filter: blur(18px);
   overflow: hidden;
@@ -243,6 +243,12 @@ h1 {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 6px;
+  padding: 10px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(2, 11, 17, 0.54);
+}
+
+.inventory-search {
   padding: 10px;
   border-bottom: 1px solid var(--line);
   background: rgba(2, 11, 17, 0.54);
@@ -327,6 +333,15 @@ h1 {
   color: #f7fbff;
 }
 
+.pill.start {
+  background: linear-gradient(90deg, #19ff9b, #00d5ff);
+}
+
+.pill.end {
+  background: linear-gradient(90deg, #7c5cff, #00d5ff);
+  color: #f7fbff;
+}
+
 .asset-card p,
 .details-body p {
   color: var(--muted);
@@ -404,6 +419,10 @@ h1 {
   gap: 8px;
 }
 
+.toolbar-buttons .icon-button {
+  min-width: 44px;
+}
+
 .icon-button.active {
   color: #10130e;
   background: var(--accent-2);
@@ -414,11 +433,23 @@ h1 {
 .flow-canvas {
   position: relative;
   overflow: hidden;
+  cursor: grab;
   background:
     radial-gradient(circle at 24px 24px, rgba(0, 213, 255, 0.16) 1px, transparent 1.5px),
     linear-gradient(180deg, rgba(0, 213, 255, 0.04), rgba(0, 240, 200, 0.025)),
     #020b11;
   background-size: 32px 32px, auto, auto;
+}
+
+.flow-canvas.panning {
+  cursor: grabbing;
+}
+
+.flow-canvas .drawflow-node,
+.flow-canvas .input,
+.flow-canvas .output,
+.flow-canvas .main-path {
+  cursor: auto;
 }
 
 .flow-canvas::before {
@@ -471,11 +502,45 @@ h1 {
   border-top: 4px solid var(--mcp);
 }
 
+.flow-canvas .drawflow .drawflow-node.start {
+  width: 150px;
+  min-height: 64px;
+  border-color: rgba(29, 255, 143, 0.5);
+  border-top: 1px solid rgba(29, 255, 143, 0.5);
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(4, 38, 31, 0.92), rgba(2, 15, 20, 0.9));
+  box-shadow: 0 0 28px rgba(29, 255, 143, 0.14), 0 12px 34px rgba(0, 0, 0, 0.38);
+}
+
+.flow-canvas .drawflow .drawflow-node.end {
+  width: 150px;
+  min-height: 64px;
+  border-color: rgba(124, 92, 255, 0.52);
+  border-top: 1px solid rgba(124, 92, 255, 0.52);
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(25, 19, 55, 0.92), rgba(2, 15, 20, 0.9));
+  box-shadow: 0 0 28px rgba(124, 92, 255, 0.16), 0 12px 34px rgba(0, 0, 0, 0.38);
+}
+
 .flow-node-card {
   min-height: 86px;
   padding: 12px;
   position: relative;
   overflow: hidden;
+}
+
+.boundary-node-card {
+  min-height: 62px;
+  padding: 10px 16px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 9px;
+  align-items: center;
+}
+
+.boundary-node-card h3 {
+  margin: 0;
+  font-size: 13px;
 }
 
 .flow-node-card::after {
@@ -486,9 +551,18 @@ h1 {
   background: linear-gradient(90deg, transparent, rgba(0, 213, 255, 0.75), transparent);
 }
 
+.boundary-node-card::after {
+  display: none;
+}
+
 .flow-node-card h3 {
   margin: 4px 0 8px;
   font-size: 14px;
+}
+
+.boundary-node-card h3 {
+  margin: 0;
+  font-size: 13px;
 }
 
 .flow-node-card code {
@@ -516,6 +590,21 @@ h1 {
   top: 34px;
   background: var(--accent);
   box-shadow: 0 0 0 3px rgba(0, 213, 255, 0.16), 0 0 20px rgba(0, 213, 255, 0.38);
+}
+
+.flow-canvas .drawflow .drawflow-node.start .output {
+  right: -8px;
+  top: 23px;
+  background: var(--success);
+  border-color: rgba(29, 255, 143, 0.95);
+  box-shadow: 0 0 0 4px rgba(29, 255, 143, 0.13), 0 0 22px rgba(29, 255, 143, 0.45);
+}
+
+.flow-canvas .drawflow .drawflow-node.end .input {
+  left: -8px;
+  top: 23px;
+  border-color: rgba(124, 92, 255, 0.95);
+  box-shadow: 0 0 0 4px rgba(124, 92, 255, 0.14), 0 0 22px rgba(124, 92, 255, 0.42);
 }
 
 .flow-canvas .drawflow .connection .main-path,
