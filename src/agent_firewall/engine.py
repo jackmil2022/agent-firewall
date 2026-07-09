@@ -71,7 +71,7 @@ def _deepagent_kwargs(
     params = set(inspect.signature(create_deep_agent).parameters)
     kwargs: dict[str, Any] = {
         "tools": tools,
-        "model": _resolve_model(spec.model),
+        "model": _resolve_model(spec.model, config),
         "subagents": [item.to_deepagents() for item in spec.subagents],
     }
     if "system_prompt" in params:
@@ -90,9 +90,10 @@ def _deepagent_kwargs(
     return {key: value for key, value in kwargs.items() if key in params}
 
 
-def _resolve_model(model: str) -> Any:
-    if model == "fake:echo":
+def _resolve_model(model: str, config: AgentFirewallConfig | None = None) -> Any:
+    model_value = str((config.models.get(model) or {}).get("model") or model) if config else model
+    if model_value == "fake:echo":
         from .fake_model import EchoChatModel
 
         return EchoChatModel()
-    return model
+    return model_value

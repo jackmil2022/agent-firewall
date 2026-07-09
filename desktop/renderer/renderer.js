@@ -4,10 +4,14 @@ const state = {
   activeTab: "agents",
   selectedNodeId: null,
   editor: null,
-  renderingFlow: false
+  renderingFlow: false,
+  activeView: "flow",
+  selectedModelKey: ""
 };
 
 const els = {
+  flowView: document.querySelector("#flowView"),
+  modelView: document.querySelector("#modelView"),
   workspacePath: document.querySelector("#workspacePath"),
   inventoryCount: document.querySelector("#inventoryCount"),
   inventoryList: document.querySelector("#inventoryList"),
@@ -19,11 +23,34 @@ const els = {
   chooseWorkspace: document.querySelector("#chooseWorkspace"),
   startFlow: document.querySelector("#startFlow"),
   saveFlow: document.querySelector("#saveFlow"),
+  saveConfig: document.querySelector("#saveConfig"),
+  reloadConfig: document.querySelector("#reloadConfig"),
   clearFlow: document.querySelector("#clearFlow"),
-  linkMode: document.querySelector("#linkMode")
-  ,
+  linkMode: document.querySelector("#linkMode"),
   runStatus: document.querySelector("#runStatus"),
-  runOutput: document.querySelector("#runOutput")
+  runOutput: document.querySelector("#runOutput"),
+  activeAgentSelect: document.querySelector("#activeAgentSelect"),
+  agentModelSelect: document.querySelector("#agentModelSelect"),
+  agentNameInput: document.querySelector("#agentNameInput"),
+  modelCount: document.querySelector("#modelCount"),
+  modelList: document.querySelector("#modelList"),
+  addModel: document.querySelector("#addModel"),
+  deleteModel: document.querySelector("#deleteModel"),
+  modelKeyInput: document.querySelector("#modelKeyInput"),
+  modelDisplayNameInput: document.querySelector("#modelDisplayNameInput"),
+  modelProviderInput: document.querySelector("#modelProviderInput"),
+  modelValueInput: document.querySelector("#modelValueInput"),
+  modelBaseUrlInput: document.querySelector("#modelBaseUrlInput"),
+  modelApiKeyEnvInput: document.querySelector("#modelApiKeyEnvInput"),
+  modelEnabledInput: document.querySelector("#modelEnabledInput"),
+  modelTemperatureInput: document.querySelector("#modelTemperatureInput"),
+  modelMaxTokensInput: document.querySelector("#modelMaxTokensInput"),
+  systemPromptInput: document.querySelector("#systemPromptInput"),
+  acpEnabledInput: document.querySelector("#acpEnabledInput"),
+  acpUnstableInput: document.querySelector("#acpUnstableInput"),
+  acpBufferInput: document.querySelector("#acpBufferInput"),
+  mcpServersInput: document.querySelector("#mcpServersInput"),
+  modelStatus: document.querySelector("#modelStatus")
 };
 
 window.addEventListener("DOMContentLoaded", async () => {
@@ -33,12 +60,16 @@ window.addEventListener("DOMContentLoaded", async () => {
 });
 
 function wireEvents() {
+  document.querySelectorAll(".view-toggle").forEach((button) => {
+    button.addEventListener("click", () => {
+      setActiveView(button.dataset.view);
+      if (button.dataset.tab) setActiveTab(button.dataset.tab);
+    });
+  });
+
   document.querySelectorAll(".tab").forEach((button) => {
     button.addEventListener("click", () => {
-      state.activeTab = button.dataset.tab;
-      document.querySelectorAll(".tab").forEach((tab) => tab.classList.remove("active"));
-      button.classList.add("active");
-      renderInventory();
+      setActiveTab(button.dataset.tab);
     });
   });
 
@@ -50,6 +81,19 @@ function wireEvents() {
   els.saveFlow.addEventListener("click", async () => {
     await saveFlow("manual");
   });
+
+  els.reloadConfig.addEventListener("click", async () => {
+    await loadWorkspace();
+    els.modelStatus.textContent = "已重新加载。";
+  });
+
+  els.saveConfig.addEventListener("click", async () => {
+    await saveModelConfig();
+  });
+
+  els.activeAgentSelect.addEventListener("change", () => renderModelForm());
+  els.addModel.addEventListener("click", () => addModelConfig());
+  els.deleteModel.addEventListener("click", () => deleteModelConfig());
 
   els.startFlow.addEventListener("click", async () => {
     if (!state.workspace || !state.data) return;
@@ -89,6 +133,23 @@ function wireEvents() {
     const asset = JSON.parse(raw);
     const point = canvasPointFromEvent(event);
     addAssetNode(asset, point.x, point.y);
+  });
+}
+
+function setActiveTab(tabName) {
+  state.activeTab = tabName;
+  document.querySelectorAll(".tab").forEach((tab) => {
+    tab.classList.toggle("active", tab.dataset.tab === tabName);
+  });
+  renderInventory();
+}
+
+function setActiveView(view) {
+  state.activeView = view;
+  els.flowView.classList.toggle("hidden", view !== "flow");
+  els.modelView.classList.toggle("hidden", view !== "model");
+  document.querySelectorAll(".view-toggle").forEach((button) => {
+    button.classList.toggle("active", button.dataset.view === view);
   });
 }
 
@@ -205,6 +266,7 @@ function setWorkspaceData(data) {
   renderInventory();
   renderCanvas({ fit: true });
   renderDetails();
+  renderModelForm();
 }
 
 function inventoryItems() {
@@ -217,6 +279,19 @@ function inventoryItems() {
       subtitle: agent.model,
       description: agent.systemPrompt,
       meta: agent
+    }));
+  }
+  if (state.activeTab === "models") {
+    const config = state.data.config || {};
+    ensureModels(config);
+    return Object.entries(config.models || {}).map(([key, model]) => ({
+      id: key,
+      type: "model",
+      label: model.display_name || key,
+      subtitle: model.model || "",
+      description: `${model.provider || "custom"} / ${model.enabled === false ? "禁用" : "启用"}`,
+      meta: { key, ...model },
+      draggable: false
     }));
   }
   if (state.activeTab === "skills") {
@@ -249,8 +324,8 @@ function renderInventory() {
   }
   items.forEach((item) => {
     const card = document.createElement("article");
-    card.className = "asset-card";
-    card.draggable = true;
+    card.className = `asset-card${item.draggable === false ? " static" : ""}`;
+    card.draggable = item.draggable !== false;
     card.innerHTML = `
       <div class="asset-top">
         <h2>${escapeHtml(item.label)}</h2>
@@ -258,10 +333,12 @@ function renderInventory() {
       </div>
       <p>${escapeHtml(item.subtitle || item.description || "")}</p>
     `;
-    card.addEventListener("dragstart", (event) => {
-      event.dataTransfer.setData("application/json", JSON.stringify(item));
-    });
-    card.addEventListener("dblclick", () => addAssetNode(item, 420, 160 + state.data.flow.nodes.length * 24));
+    if (item.draggable !== false) {
+      card.addEventListener("dragstart", (event) => {
+        event.dataTransfer.setData("application/json", JSON.stringify(item));
+      });
+      card.addEventListener("dblclick", () => addAssetNode(item, 420, 160 + state.data.flow.nodes.length * 24));
+    }
     els.inventoryList.appendChild(card);
   });
 }
@@ -319,6 +396,8 @@ function addEditorNode(node) {
       flowId: node.id,
       type: node.type,
       label: node.label,
+      ref: node.ref,
+      params: node.params || {},
       meta: node.meta || {}
     },
     nodeHtml(node)
@@ -355,8 +434,10 @@ function flowFromEditor() {
     id: node.data.flowId,
     type: node.data.type,
     label: node.data.label,
+    ref: node.data.ref,
     x: node.pos_x,
     y: node.pos_y,
+    params: node.data.params || {},
     meta: node.data.meta || {}
   }));
   const edgeKeys = new Set();
@@ -413,6 +494,7 @@ function currentFlow() {
   return {
     nodes: state.data.flow.nodes,
     edges: state.data.flow.edges,
+    limits: state.data.flow.limits,
     updatedAt: new Date().toISOString()
   };
 }
@@ -422,6 +504,234 @@ async function saveFlow(reason) {
   const result = await window.agentFirewall.saveFlow(state.workspace, currentFlow());
   els.workspacePath.textContent = `${state.workspace} / ${reason === "manual" ? "手动保存" : "已自动保存"}`;
   return result;
+}
+
+function renderModelForm() {
+  if (!state.data?.config) return;
+  const config = state.data.config;
+  ensureModels(config);
+  const modelKeys = Object.keys(config.models || {});
+  if (!modelKeys.includes(state.selectedModelKey)) {
+    state.selectedModelKey = modelKeys[0] || "";
+  }
+  renderModelList(config);
+  const model = config.models?.[state.selectedModelKey] || {};
+  const params = model.params || {};
+  els.modelKeyInput.value = state.selectedModelKey || "";
+  els.modelDisplayNameInput.value = model.display_name || "";
+  els.modelProviderInput.value = model.provider || "";
+  els.modelValueInput.value = model.model || "";
+  els.modelBaseUrlInput.value = model.base_url || "";
+  els.modelApiKeyEnvInput.value = model.api_key_env || "";
+  els.modelEnabledInput.checked = Boolean(model.enabled ?? true);
+  els.modelTemperatureInput.value = params.temperature ?? "";
+  els.modelMaxTokensInput.value = params.max_tokens ?? "";
+
+  const agentKeys = Object.keys(config.agents || {});
+  const activeKey = els.activeAgentSelect.value || config.active_agent || agentKeys[0] || "";
+  els.activeAgentSelect.innerHTML = agentKeys
+    .map((key) => `<option value="${escapeHtml(key)}">${escapeHtml(key)}</option>`)
+    .join("");
+  els.activeAgentSelect.value = agentKeys.includes(activeKey) ? activeKey : agentKeys[0] || "";
+
+  const agent = config.agents?.[els.activeAgentSelect.value] || {};
+  els.agentNameInput.value = agent.name || "";
+  els.agentModelSelect.innerHTML = modelKeys
+    .map((key) => `<option value="${escapeHtml(key)}">${escapeHtml(key)}</option>`)
+    .join("");
+  els.agentModelSelect.value = modelKeys.includes(agent.model) ? agent.model : modelKeys[0] || "";
+  els.systemPromptInput.value = agent.system_prompt || "";
+  els.mcpServersInput.value = JSON.stringify(agent.mcp_servers || {}, null, 2);
+  els.acpEnabledInput.checked = Boolean(config.acp?.enabled ?? true);
+  els.acpUnstableInput.checked = Boolean(config.acp?.use_unstable_protocol);
+  els.acpBufferInput.value = String(config.acp?.stdio_buffer_limit_bytes || 52428800);
+}
+
+function renderModelList(config) {
+  const keys = Object.keys(config.models || {});
+  els.modelCount.textContent = String(keys.length);
+  els.modelList.innerHTML = "";
+  keys.forEach((key) => {
+    const model = config.models[key] || {};
+    const usedBy = agentsUsingModel(config, key);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `model-list-item${key === state.selectedModelKey ? " active" : ""}`;
+    button.innerHTML = `
+      <strong>${escapeHtml(model.display_name || key)}</strong>
+      <span>${escapeHtml(key)}</span>
+      <span>${escapeHtml(model.provider || "-")} / ${escapeHtml(model.model || "-")}</span>
+      <div class="model-list-meta">
+        <span class="model-badge ${model.enabled === false ? "" : "enabled"}">${model.enabled === false ? "禁用" : "启用"}</span>
+        <span class="model-badge">${escapeHtml(usedBy.length ? usedBy.join(", ") : "未绑定")}</span>
+      </div>
+    `;
+    button.addEventListener("click", () => {
+      state.selectedModelKey = key;
+      renderModelForm();
+    });
+    els.modelList.appendChild(button);
+  });
+}
+
+async function saveModelConfig() {
+  if (!state.workspace || !state.data?.config) return;
+  const config = structuredClone(state.data.config);
+  ensureModels(config);
+  const agentKey = els.activeAgentSelect.value;
+  if (!agentKey || !config.agents?.[agentKey]) return;
+
+  const oldModelKey = state.selectedModelKey;
+  const newModelKey = els.modelKeyInput.value.trim();
+  if (!newModelKey) {
+    els.modelStatus.textContent = "模型名字不能为空。";
+    return;
+  }
+  if (oldModelKey !== newModelKey && config.models[newModelKey]) {
+    els.modelStatus.textContent = "模型名字已存在。";
+    return;
+  }
+  if (!els.modelProviderInput.value.trim()) {
+    els.modelStatus.textContent = "Provider 不能为空。";
+    return;
+  }
+  if (!els.modelValueInput.value.trim()) {
+    els.modelStatus.textContent = "模型 ID 不能为空。";
+    return;
+  }
+
+  let mcpServers;
+  try {
+    mcpServers = JSON.parse(els.mcpServersInput.value || "{}");
+  } catch (error) {
+    els.modelStatus.textContent = `MCP JSON 无效: ${error.message}`;
+    return;
+  }
+
+  if (oldModelKey && oldModelKey !== newModelKey) {
+    config.models[newModelKey] = config.models[oldModelKey] || {};
+    delete config.models[oldModelKey];
+    Object.values(config.agents || {}).forEach((agent) => {
+      if (agent.model === oldModelKey) agent.model = newModelKey;
+    });
+  }
+  config.models[newModelKey] = {
+    ...(config.models[newModelKey] || {}),
+    display_name: els.modelDisplayNameInput.value.trim(),
+    provider: els.modelProviderInput.value.trim(),
+    model: els.modelValueInput.value.trim(),
+    base_url: els.modelBaseUrlInput.value.trim(),
+    api_key_env: els.modelApiKeyEnvInput.value.trim(),
+    enabled: els.modelEnabledInput.checked,
+    params: compactModelParams()
+  };
+
+  config.active_agent = agentKey;
+  const selectedAgentModel = els.agentModelSelect.value === oldModelKey ? newModelKey : els.agentModelSelect.value;
+  config.agents[agentKey] = {
+    ...config.agents[agentKey],
+    name: els.agentNameInput.value.trim() || agentKey,
+    model: selectedAgentModel || newModelKey,
+    system_prompt: els.systemPromptInput.value,
+    mcp_servers: mcpServers
+  };
+  config.acp = {
+    ...(config.acp || {}),
+    enabled: els.acpEnabledInput.checked,
+    use_unstable_protocol: els.acpUnstableInput.checked,
+    stdio_buffer_limit_bytes: Number(els.acpBufferInput.value) || 52428800
+  };
+
+  els.saveConfig.disabled = true;
+  els.modelStatus.textContent = "正在保存...";
+  try {
+    const result = await window.agentFirewall.saveConfig(state.workspace, config);
+    const reloaded = await window.agentFirewall.loadWorkspace(state.workspace);
+    state.selectedModelKey = newModelKey;
+    setWorkspaceData(reloaded);
+    setActiveView("model");
+    els.modelStatus.textContent = `已保存到 ${result.database}`;
+  } catch (error) {
+    els.modelStatus.textContent = error.message;
+  } finally {
+    els.saveConfig.disabled = false;
+  }
+}
+
+function ensureModels(config) {
+  config.models = config.models && typeof config.models === "object" ? config.models : {};
+  Object.values(config.agents || {}).forEach((agent) => {
+    const model = agent.model || "fake:echo";
+    if (!config.models[model]) {
+      config.models[model] = {
+        display_name: model,
+        provider: model.includes(":") ? model.split(":", 1)[0] : "",
+        model,
+        base_url: "",
+        api_key_env: "",
+        enabled: true,
+        params: {}
+      };
+    }
+  });
+}
+
+function agentsUsingModel(config, modelKey) {
+  return Object.entries(config.agents || {})
+    .filter(([, agent]) => agent.model === modelKey)
+    .map(([key]) => key);
+}
+
+function compactModelParams() {
+  const params = {};
+  const temperature = els.modelTemperatureInput.value;
+  const maxTokens = els.modelMaxTokensInput.value;
+  if (temperature !== "") params.temperature = Number(temperature);
+  if (maxTokens !== "") params.max_tokens = Number(maxTokens);
+  return params;
+}
+
+function addModelConfig() {
+  if (!state.data?.config) return;
+  const config = state.data.config;
+  ensureModels(config);
+  let index = Object.keys(config.models).length + 1;
+  let key = `model-${index}`;
+  while (config.models[key]) {
+    index += 1;
+    key = `model-${index}`;
+  }
+  config.models[key] = {
+    display_name: "",
+    provider: "openai",
+    model: "openai:gpt-5",
+    base_url: "",
+    api_key_env: "OPENAI_API_KEY",
+    enabled: true,
+    params: { temperature: 0.2, max_tokens: 4096 }
+  };
+  state.selectedModelKey = key;
+  renderModelForm();
+}
+
+function deleteModelConfig() {
+  if (!state.data?.config) return;
+  const config = state.data.config;
+  ensureModels(config);
+  const key = state.selectedModelKey;
+  const modelKeys = Object.keys(config.models);
+  if (!key || modelKeys.length <= 1) {
+    els.modelStatus.textContent = "至少保留一个模型配置。";
+    return;
+  }
+  const usedBy = agentsUsingModel(config, key);
+  if (usedBy.length) {
+    els.modelStatus.textContent = `模型正在被使用，先切换这些智能体: ${usedBy.join(", ")}`;
+    return;
+  }
+  delete config.models[key];
+  state.selectedModelKey = Object.keys(config.models)[0] || "";
+  renderModelForm();
 }
 
 let autosaveTimer = null;
@@ -471,6 +781,7 @@ function translateType(type) {
   const map = {
     agent: "智能体",
     skill: "技能",
+    model: "模型",
     mcp: "MCP"
   };
   return map[type] || type;

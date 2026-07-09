@@ -11,3 +11,4 @@ desktop/release/
 desktop/screenshot.png
 desktop/screenshot-*.png
 .electron-runner/
+.agent-firewall/*.sqlite3

@@ -1,6 +1,6 @@
 const { app, BrowserWindow, ipcMain, dialog, Menu } = require("electron");
 const path = require("path");
-const { loadWorkspace, saveFlow, saveAndStartFlow } = require("./workspace");
+const { loadWorkspace, saveConfig, saveFlow, saveAndStartFlow } = require("./workspace");
 
 let mainWindow;
 
@@ -61,6 +61,11 @@ function registerIpc() {
   ipcMain.handle("flow:save", async (_event, payload) => {
     const workspace = path.resolve(payload.workspace);
     return saveFlow(workspace, payload.flow);
+  });
+
+  ipcMain.handle("config:save", async (_event, payload) => {
+    const workspace = path.resolve(payload.workspace);
+    return saveConfig(workspace, payload.config);
   });
 
   ipcMain.handle("flow:start", async (_event, payload) => {

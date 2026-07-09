@@ -10,18 +10,27 @@
   <body>
     <main class="app-shell">
       <header class="topbar">
-        <div>
+        <div class="brand-block">
           <h1>Agent Firewall</h1>
           <p id="workspacePath">正在加载工作区...</p>
         </div>
-        <div class="actions">
-          <button id="chooseWorkspace" type="button">打开</button>
-          <button id="startFlow" type="button">启动</button>
-          <button id="saveFlow" type="button">保存编排</button>
+        <nav class="main-nav" aria-label="主导航">
+          <button class="view-toggle active" data-view="flow" data-tab="agents" type="button">编排</button>
+          <button class="view-toggle" data-view="flow" data-tab="agents" type="button">智能体</button>
+          <button class="view-toggle" data-view="model" type="button">模型</button>
+          <button class="nav-disabled" type="button" disabled>防护</button>
+          <button class="nav-disabled" type="button" disabled>观测</button>
+          <button class="nav-disabled" type="button" disabled>分析</button>
+        </nav>
+        <div class="top-status">
+          <button id="chooseWorkspace" class="db-pill" type="button">SQLite 本地</button>
+          <button class="round-tool" type="button" disabled>⌕</button>
+          <button class="round-tool" type="button" disabled>▣</button>
+          <button class="user-pill" type="button" disabled>A Admin</button>
         </div>
       </header>
 
-      <section class="workspace-grid">
+      <section id="flowView" class="workspace-grid">
         <aside class="inventory">
           <div class="panel-heading">
             <span>资源库</span>
@@ -29,6 +38,7 @@
           </div>
           <div class="tabs" role="tablist">
             <button class="tab active" data-tab="agents" type="button">智能体</button>
+            <button class="tab" data-tab="models" type="button">模型</button>
             <button class="tab" data-tab="skills" type="button">技能</button>
             <button class="tab" data-tab="mcp" type="button">MCP</button>
           </div>
@@ -47,6 +57,10 @@
             </div>
           </div>
           <div id="flowCanvas" class="flow-canvas" aria-label="智能体编排画布"></div>
+          <div class="canvas-actionbar" aria-label="编排操作">
+            <button id="startFlow" class="run-primary" type="button">启动</button>
+            <button id="saveFlow" type="button">保存编排</button>
+          </div>
         </section>
 
         <aside class="details">
@@ -67,6 +81,118 @@
             <code id="acpSummary">-</code>
           </div>
         </aside>
+      </section>
+
+      <section id="modelView" class="model-page hidden">
+        <div class="model-header">
+          <div>
+            <span class="eyebrow">本地配置</span>
+            <h2>大模型配置</h2>
+          </div>
+          <div class="toolbar-buttons">
+            <button id="reloadConfig" type="button">重新加载</button>
+            <button id="saveConfig" type="button">保存配置</button>
+          </div>
+        </div>
+
+        <div class="model-grid">
+          <section class="model-section">
+            <div class="model-list-head">
+              <span>模型列表</span>
+              <strong id="modelCount">0</strong>
+            </div>
+            <div id="modelList" class="model-list"></div>
+            <div class="field-row split">
+              <button id="addModel" type="button">新增模型</button>
+              <button id="deleteModel" type="button">删除模型</button>
+            </div>
+          </section>
+
+          <section class="model-section">
+            <div class="field-row">
+              <label for="modelKeyInput">模型名字</label>
+              <input id="modelKeyInput" type="text" autocomplete="off" placeholder="work-gpt5" />
+            </div>
+            <div class="field-row">
+              <label for="modelDisplayNameInput">展示名</label>
+              <input id="modelDisplayNameInput" type="text" autocomplete="off" placeholder="工作 GPT-5" />
+            </div>
+            <div class="field-row">
+              <label for="modelProviderInput">Provider</label>
+              <input id="modelProviderInput" type="text" autocomplete="off" placeholder="openai" />
+            </div>
+            <div class="field-row">
+              <label for="modelValueInput">模型 ID</label>
+              <input id="modelValueInput" type="text" autocomplete="off" placeholder="openai:gpt-5" />
+            </div>
+            <div class="field-row">
+              <label for="modelBaseUrlInput">Base URL</label>
+              <input id="modelBaseUrlInput" type="text" autocomplete="off" />
+            </div>
+            <div class="field-row">
+              <label for="modelApiKeyEnvInput">API key env</label>
+              <input id="modelApiKeyEnvInput" type="text" autocomplete="off" placeholder="OPENAI_API_KEY" />
+            </div>
+            <div class="field-row inline">
+              <label>
+                <input id="modelEnabledInput" type="checkbox" />
+                启用
+              </label>
+              <label for="modelTemperatureInput">
+                Temperature
+                <input id="modelTemperatureInput" type="number" min="0" max="2" step="0.1" />
+              </label>
+            </div>
+            <div class="field-row">
+              <label for="modelMaxTokensInput">Max tokens</label>
+              <input id="modelMaxTokensInput" type="number" min="1" step="1" />
+            </div>
+          </section>
+
+          <section class="model-section">
+            <div class="field-row">
+              <label for="activeAgentSelect">当前智能体</label>
+              <select id="activeAgentSelect"></select>
+            </div>
+            <div class="field-row">
+              <label for="agentNameInput">名称</label>
+              <input id="agentNameInput" type="text" autocomplete="off" />
+            </div>
+            <div class="field-row">
+              <label for="agentModelSelect">使用模型名字</label>
+              <select id="agentModelSelect"></select>
+            </div>
+            <div class="field-row">
+              <label for="systemPromptInput">系统提示词</label>
+              <textarea id="systemPromptInput" rows="8"></textarea>
+            </div>
+          </section>
+
+          <section class="model-section full-width">
+            <div class="field-row inline">
+              <label>
+                <input id="acpEnabledInput" type="checkbox" />
+                ACP 启用
+              </label>
+              <label>
+                <input id="acpUnstableInput" type="checkbox" />
+                unstable protocol
+              </label>
+            </div>
+            <div class="field-row">
+              <label for="acpBufferInput">stdio buffer bytes</label>
+              <input id="acpBufferInput" type="number" min="1024" step="1024" />
+            </div>
+            <div class="field-row">
+              <label for="mcpServersInput">MCP servers JSON</label>
+              <textarea id="mcpServersInput" rows="10" spellcheck="false"></textarea>
+            </div>
+            <div class="field-row">
+              <label for="modelStatus">状态</label>
+              <pre id="modelStatus">就绪。</pre>
+            </div>
+          </section>
+        </div>
       </section>
     </main>
     <script src="../node_modules/drawflow/dist/drawflow.min.js"></script>

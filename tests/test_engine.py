@@ -51,3 +51,25 @@ def test_deepagent_kwargs_include_customization(tmp_path: Path) -> None:
     assert kwargs["subagents"][0]["name"] == "skill-builder"
     assert kwargs["backend"].root_dir == tmp_path
     assert kwargs["backend"].virtual_mode is True
+
+
+def test_deepagent_kwargs_resolve_named_model(tmp_path: Path) -> None:
+    write_default_config(tmp_path)
+    install_bundled_skills(tmp_path)
+    from agent_firewall.store import AgentFirewallStore
+
+    data = AgentFirewallStore(tmp_path).get_config()
+    data["models"]["work"] = {"model": "openai:gpt-5", "provider": "openai"}
+    data["agents"]["default"]["model"] = "work"
+    AgentFirewallStore(tmp_path).save_config(data)
+    config = load_config(workspace=tmp_path)
+
+    kwargs = _deepagent_kwargs(
+        fake_create_deep_agent,
+        config,
+        config.active,
+        [agent_policy_check],
+        FakeFilesystemBackend,
+    )
+
+    assert kwargs["model"] == "openai:gpt-5"
