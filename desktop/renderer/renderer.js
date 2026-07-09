@@ -3,9 +3,8 @@ const state = {
   data: null,
   activeTab: "agents",
   selectedNodeId: null,
-  linkMode: false,
-  linkSource: null,
-  drag: null
+  editor: null,
+  renderingFlow: false
 };
 
 const els = {
@@ -13,7 +12,6 @@ const els = {
   inventoryCount: document.querySelector("#inventoryCount"),
   inventoryList: document.querySelector("#inventoryList"),
   flowCanvas: document.querySelector("#flowCanvas"),
-  edgeLayer: document.querySelector("#edgeLayer"),
   flowStats: document.querySelector("#flowStats"),
   selectedType: document.querySelector("#selectedType"),
   detailsBody: document.querySelector("#detailsBody"),
@@ -29,6 +27,7 @@ const els = {
 };
 
 window.addEventListener("DOMContentLoaded", async () => {
+  initFlowEditor();
   wireEvents();
   await loadWorkspace();
 });
@@ -73,15 +72,13 @@ function wireEvents() {
   els.clearFlow.addEventListener("click", () => {
     state.data.flow = { nodes: [], edges: [], updatedAt: new Date().toISOString() };
     state.selectedNodeId = null;
-    renderCanvas();
+    renderCanvas({ fit: true });
     renderDetails();
     scheduleAutosave();
   });
 
   els.linkMode.addEventListener("click", () => {
-    state.linkMode = !state.linkMode;
-    state.linkSource = null;
-    els.linkMode.classList.toggle("active", state.linkMode);
+    fitEditorView();
   });
 
   els.flowCanvas.addEventListener("dragover", (event) => event.preventDefault());
@@ -90,15 +87,103 @@ function wireEvents() {
     const raw = event.dataTransfer.getData("application/json");
     if (!raw) return;
     const asset = JSON.parse(raw);
-    const rect = els.flowCanvas.getBoundingClientRect();
-    addNode(asset, event.clientX - rect.left, event.clientY - rect.top);
+    const point = canvasPointFromEvent(event);
+    addAssetNode(asset, point.x, point.y);
   });
+}
 
-  window.addEventListener("mousemove", onMouseMove);
-  window.addEventListener("mouseup", () => {
-    state.drag = null;
+function initFlowEditor() {
+  if (!window.Drawflow) {
+    els.flowCanvas.textContent = "Drawflow 加载失败。";
+    return;
+  }
+  const editor = new Drawflow(els.flowCanvas);
+  editor.reroute = true;
+  editor.reroute_fix_curvature = true;
+  editor.curvature = 0.42;
+  editor.reroute_curvature = 0.42;
+  editor.line_path = 4;
+  editor.zoom_min = 0.45;
+  editor.zoom_max = 1.7;
+  editor.zoom_value = 0.08;
+  editor.start();
+  state.editor = editor;
+
+  editor.on("nodeSelected", (drawflowId) => {
+    const node = editor.getNodeFromId(drawflowId);
+    state.selectedNodeId = node?.data?.flowId || null;
+    renderDetails();
   });
-  window.addEventListener("resize", renderEdges);
+  editor.on("nodeUnselected", () => renderDetails());
+  ["nodeMoved", "nodeRemoved", "connectionRemoved", "addReroute", "removeReroute", "rerouteMoved"].forEach((eventName) => {
+    editor.on(eventName, () => syncFlowFromEditor(true));
+  });
+  editor.on("connectionCreated", () => {
+    if (state.renderingFlow) return;
+    syncFlowFromEditor(true);
+    renderCanvas();
+  });
+}
+
+function canvasPointFromEvent(event) {
+  const rect = els.flowCanvas.getBoundingClientRect();
+  const editor = state.editor;
+  if (!editor) return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+  return {
+    x: (event.clientX - rect.left - editor.canvas_x) / editor.zoom,
+    y: (event.clientY - rect.top - editor.canvas_y) / editor.zoom
+  };
+}
+
+function resetEditorView() {
+  const editor = state.editor;
+  if (!editor) return;
+  editor.canvas_x = 0;
+  editor.canvas_y = 0;
+  editor.zoom = 1;
+  editor.zoom_last_value = 1;
+  editor.precanvas.style.transform = "";
+}
+
+function setEditorView(x, y, zoom) {
+  const editor = state.editor;
+  if (!editor) return;
+  editor.canvas_x = x;
+  editor.canvas_y = y;
+  editor.zoom = zoom;
+  editor.zoom_last_value = zoom;
+  editor.precanvas.style.transform = `translate(${x}px, ${y}px) scale(${zoom})`;
+}
+
+function fitEditorView() {
+  const editor = state.editor;
+  if (!editor) return;
+  const nodes = Object.values(editor.drawflow.drawflow.Home.data);
+  if (nodes.length === 0) {
+    resetEditorView();
+    return;
+  }
+  const boxes = nodes.map((node) => ({
+    x: node.pos_x,
+    y: node.pos_y,
+    width: els.flowCanvas.querySelector(`#node-${cssEscape(String(node.id))}`)?.offsetWidth || 216,
+    height: els.flowCanvas.querySelector(`#node-${cssEscape(String(node.id))}`)?.offsetHeight || 120
+  }));
+  const minX = Math.min(...boxes.map((box) => box.x));
+  const minY = Math.min(...boxes.map((box) => box.y));
+  const maxX = Math.max(...boxes.map((box) => box.x + box.width));
+  const maxY = Math.max(...boxes.map((box) => box.y + box.height));
+  const padding = 48;
+  const width = Math.max(1, maxX - minX);
+  const height = Math.max(1, maxY - minY);
+  const zoom = clamp(
+    Math.min((els.flowCanvas.clientWidth - padding * 2) / width, (els.flowCanvas.clientHeight - padding * 2) / height, 1),
+    editor.zoom_min,
+    editor.zoom_max
+  );
+  const x = (els.flowCanvas.clientWidth - width * zoom) / 2 - minX * zoom;
+  const y = (els.flowCanvas.clientHeight - height * zoom) / 2 - minY * zoom;
+  setEditorView(x, y, zoom);
 }
 
 async function loadWorkspace() {
@@ -106,6 +191,7 @@ async function loadWorkspace() {
     const result = await window.agentFirewall.loadWorkspace();
     setWorkspaceData(result);
   } catch (error) {
+    console.error(error.stack || error);
     els.workspacePath.textContent = error.message;
   }
 }
@@ -117,9 +203,8 @@ function setWorkspaceData(data) {
   els.workspacePath.textContent = data.workspace;
   els.acpSummary.textContent = data.acp.enabled ? "已启用 / stdio" : "已禁用";
   renderInventory();
-  renderCanvas();
+  renderCanvas({ fit: true });
   renderDetails();
-  scheduleAutosave();
 }
 
 function inventoryItems() {
@@ -176,124 +261,130 @@ function renderInventory() {
     card.addEventListener("dragstart", (event) => {
       event.dataTransfer.setData("application/json", JSON.stringify(item));
     });
-    card.addEventListener("dblclick", () => addNode(item, 420, 160 + state.data.flow.nodes.length * 24));
+    card.addEventListener("dblclick", () => addAssetNode(item, 420, 160 + state.data.flow.nodes.length * 24));
     els.inventoryList.appendChild(card);
   });
 }
 
-function addNode(asset, x, y) {
+function addAssetNode(asset, x, y) {
   const baseId = `${asset.type}:${asset.id}`;
   const existing = state.data.flow.nodes.filter((node) => node.id.startsWith(baseId)).length;
   const id = existing ? `${baseId}:${existing + 1}` : baseId;
-  state.data.flow.nodes = [
-    ...state.data.flow.nodes,
-    {
-      id,
-      type: asset.type,
-      label: asset.label,
-      x: clamp(x - 99, 12, Math.max(12, els.flowCanvas.clientWidth - 220)),
-      y: clamp(y - 42, 12, Math.max(12, els.flowCanvas.clientHeight - 110)),
-      meta: asset.meta
-    }
-  ];
+  addEditorNode({
+    id,
+    type: asset.type,
+    label: asset.label,
+    x: Math.max(12, x - 99),
+    y: Math.max(12, y - 42),
+    meta: asset.meta
+  });
+  syncFlowFromEditor(true);
   state.selectedNodeId = id;
-  renderCanvas();
   renderDetails();
 }
 
-function renderCanvas() {
-  els.flowCanvas.querySelectorAll(".flow-node").forEach((node) => node.remove());
+function renderCanvas({ fit = false } = {}) {
+  const editor = state.editor;
+  if (!editor || !state.data) return;
+  state.renderingFlow = true;
+  editor.clearModuleSelected();
+  const idMap = new Map();
   state.data.flow.nodes.forEach((node) => {
-    const el = document.createElement("article");
-    el.className = `flow-node ${node.type}${node.id === state.selectedNodeId ? " selected" : ""}`;
-    el.style.left = `${node.x}px`;
-    el.style.top = `${node.y}px`;
-    el.dataset.nodeId = node.id;
-    el.innerHTML = `
-      <span class="pill ${node.type}">${translateType(node.type)}</span>
-      <h3>${escapeHtml(node.label)}</h3>
-      <code>${escapeHtml(node.meta?.model || node.meta?.path || node.meta?.agent || node.id)}</code>
-    `;
-    el.addEventListener("mousedown", (event) => startNodeDrag(event, node.id));
-    el.addEventListener("click", (event) => {
-      event.stopPropagation();
-      handleNodeClick(node.id);
-    });
-    els.flowCanvas.appendChild(el);
+    const drawflowId = addEditorNode(node);
+    idMap.set(node.id, drawflowId);
   });
-  renderEdges();
+  state.data.flow.edges.forEach((edge) => {
+    const from = idMap.get(edge.from);
+    const to = idMap.get(edge.to);
+    if (from && to) editor.addConnection(from, to, "output_1", "input_1");
+  });
+  state.renderingFlow = false;
+  if (fit) fitEditorView();
+  selectEditorNode(state.selectedNodeId);
   els.flowStats.textContent = `${state.data.flow.nodes.length} 个节点 / ${state.data.flow.edges.length} 条连线`;
 }
 
-function handleNodeClick(nodeId) {
-  if (state.linkMode) {
-    if (!state.linkSource) {
-      state.linkSource = nodeId;
-      state.selectedNodeId = nodeId;
-    } else if (state.linkSource !== nodeId) {
-      const edge = { from: state.linkSource, to: nodeId };
-      const exists = state.data.flow.edges.some((item) => item.from === edge.from && item.to === edge.to);
-      if (!exists) state.data.flow.edges = [...state.data.flow.edges, edge];
-      state.linkSource = null;
-      scheduleAutosave();
-    }
-  } else {
-    state.selectedNodeId = nodeId;
+function addEditorNode(node) {
+  const editor = state.editor;
+  if (!editor) return null;
+  const before = new Set(Object.keys(editor.drawflow.drawflow.Home.data));
+  editor.addNode(
+    node.type,
+    1,
+    1,
+    Math.max(12, Number(node.x) || 12),
+    Math.max(12, Number(node.y) || 12),
+    node.type,
+    {
+      flowId: node.id,
+      type: node.type,
+      label: node.label,
+      meta: node.meta || {}
+    },
+    nodeHtml(node)
+  );
+  return Object.keys(editor.drawflow.drawflow.Home.data).find((id) => !before.has(id)) || null;
+}
+
+function selectEditorNode(flowId) {
+  els.flowCanvas.querySelectorAll(".drawflow-node.selected").forEach((node) => node.classList.remove("selected"));
+  if (!flowId || !state.editor) return;
+  const drawflowId = Object.values(state.editor.drawflow.drawflow.Home.data)
+    .find((node) => node.data?.flowId === flowId)?.id;
+  if (!drawflowId) return;
+  const element = els.flowCanvas.querySelector(`#node-${cssEscape(String(drawflowId))}`);
+  if (element) element.classList.add("selected");
+}
+
+function syncFlowFromEditor(autosave) {
+  if (state.renderingFlow || !state.data || !state.editor) return;
+  state.data.flow = flowFromEditor();
+  if (!state.data.flow.nodes.some((node) => node.id === state.selectedNodeId)) {
+    state.selectedNodeId = state.data.flow.nodes[0]?.id || null;
   }
-  renderCanvas();
+  els.flowStats.textContent = `${state.data.flow.nodes.length} 个节点 / ${state.data.flow.edges.length} 条连线`;
   renderDetails();
+  if (autosave) scheduleAutosave();
 }
 
-function startNodeDrag(event, nodeId) {
-  const node = state.data.flow.nodes.find((item) => item.id === nodeId);
-  if (!node) return;
-  state.selectedNodeId = nodeId;
-  state.drag = {
-    nodeId,
-    offsetX: event.clientX - node.x,
-    offsetY: event.clientY - node.y
-  };
-  renderCanvas();
-  renderDetails();
-}
-
-function onMouseMove(event) {
-  if (!state.drag || !state.data) return;
-  const node = state.data.flow.nodes.find((item) => item.id === state.drag.nodeId);
-  if (!node) return;
-  const rect = els.flowCanvas.getBoundingClientRect();
-  node.x = clamp(event.clientX - rect.left - state.drag.offsetX, 12, Math.max(12, rect.width - 220));
-  node.y = clamp(event.clientY - rect.top - state.drag.offsetY, 12, Math.max(12, rect.height - 110));
-  const element = els.flowCanvas.querySelector(`[data-node-id="${cssEscape(node.id)}"]`);
-  if (element) {
-    element.style.left = `${node.x}px`;
-    element.style.top = `${node.y}px`;
-  }
-  renderEdges();
-  scheduleAutosave();
-}
-
-function renderEdges() {
-  if (!state.data) return;
-  const rect = els.flowCanvas.getBoundingClientRect();
-  els.edgeLayer.setAttribute("viewBox", `0 0 ${rect.width} ${rect.height}`);
-  els.edgeLayer.innerHTML = "";
-  state.data.flow.edges.forEach((edge) => {
-    const from = state.data.flow.nodes.find((node) => node.id === edge.from);
-    const to = state.data.flow.nodes.find((node) => node.id === edge.to);
-    if (!from || !to) return;
-    const x1 = from.x + 198;
-    const y1 = from.y + 42;
-    const x2 = to.x;
-    const y2 = to.y + 42;
-    const mid = Math.max(40, Math.abs(x2 - x1) / 2);
-    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    path.setAttribute("d", `M ${x1} ${y1} C ${x1 + mid} ${y1}, ${x2 - mid} ${y2}, ${x2} ${y2}`);
-    path.setAttribute("stroke", "rgba(214,255,92,0.72)");
-    path.setAttribute("stroke-width", "2");
-    path.setAttribute("fill", "none");
-    els.edgeLayer.appendChild(path);
+function flowFromEditor() {
+  const data = state.editor.export().drawflow.Home.data;
+  const entries = Object.values(data);
+  const drawflowToFlow = new Map(entries.map((node) => [String(node.id), node.data.flowId]));
+  const nodes = entries.map((node) => ({
+    id: node.data.flowId,
+    type: node.data.type,
+    label: node.data.label,
+    x: node.pos_x,
+    y: node.pos_y,
+    meta: node.data.meta || {}
+  }));
+  const edgeKeys = new Set();
+  const edges = [];
+  entries.forEach((node) => {
+    Object.values(node.outputs || {}).forEach((output) => {
+      (output.connections || []).forEach((connection) => {
+        const from = drawflowToFlow.get(String(node.id));
+        const to = drawflowToFlow.get(String(connection.node));
+        const key = `${from}->${to}`;
+        if (from && to && from !== to && !edgeKeys.has(key)) {
+          edgeKeys.add(key);
+          edges.push({ from, to });
+        }
+      });
+    });
   });
+  return { nodes, edges, updatedAt: new Date().toISOString() };
+}
+
+function nodeHtml(node) {
+  return `
+    <div class="flow-node-card">
+      <span class="pill ${node.type}">${translateType(node.type)}</span>
+      <h3>${escapeHtml(node.label)}</h3>
+      <code>${escapeHtml(node.meta?.model || node.meta?.path || node.meta?.agent || node.id)}</code>
+    </div>
+  `;
 }
 
 function renderDetails() {
@@ -318,6 +409,7 @@ function renderDetails() {
 }
 
 function currentFlow() {
+  syncFlowFromEditor(false);
   return {
     nodes: state.data.flow.nodes,
     edges: state.data.flow.edges,

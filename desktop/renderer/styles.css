@@ -240,52 +240,101 @@ h1 {
   background-size: 32px 32px;
 }
 
-.edge-layer {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
+.flow-canvas.parent-drawflow {
+  display: block;
 }
 
-.flow-node {
-  position: absolute;
-  width: 198px;
-  min-height: 84px;
-  padding: 12px;
+.flow-canvas .drawflow {
+  width: 100%;
+  height: 100%;
+}
+
+.flow-canvas .drawflow .drawflow-node {
+  width: 216px;
+  min-height: 90px;
+  padding: 0;
   border: 1px solid var(--line);
   background: rgba(25, 31, 26, 0.96);
   border-radius: 8px;
-  cursor: move;
+  color: var(--text);
   box-shadow: 0 14px 36px rgba(0, 0, 0, 0.25);
 }
 
-.flow-node.selected {
+.flow-canvas .drawflow .drawflow-node.selected {
+  background: rgba(25, 31, 26, 0.98);
   border-color: var(--accent);
   box-shadow: 0 0 0 2px rgba(214, 255, 92, 0.2), 0 14px 36px rgba(0, 0, 0, 0.25);
 }
 
-.flow-node.agent {
+.flow-canvas .drawflow .drawflow-node.agent {
   border-top: 4px solid var(--agent);
 }
 
-.flow-node.skill {
+.flow-canvas .drawflow .drawflow-node.skill {
   border-top: 4px solid var(--skill);
 }
 
-.flow-node.mcp {
+.flow-canvas .drawflow .drawflow-node.mcp {
   border-top: 4px solid var(--mcp);
 }
 
-.flow-node h3 {
+.flow-node-card {
+  min-height: 86px;
+  padding: 12px;
+}
+
+.flow-node-card h3 {
   margin: 4px 0 8px;
   font-size: 14px;
 }
 
-.flow-node code {
+.flow-node-card code {
   color: var(--muted);
   font-size: 11px;
   overflow-wrap: anywhere;
+}
+
+.flow-canvas .drawflow .drawflow-node .input,
+.flow-canvas .drawflow .drawflow-node .output {
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(238, 243, 232, 0.88);
+  background: #10130e;
+  box-shadow: 0 0 0 3px rgba(104, 216, 214, 0.18);
+}
+
+.flow-canvas .drawflow .drawflow-node .input {
+  left: -10px;
+  top: 34px;
+}
+
+.flow-canvas .drawflow .drawflow-node .output {
+  right: 8px;
+  top: 34px;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px rgba(214, 255, 92, 0.18);
+}
+
+.flow-canvas .drawflow .connection .main-path,
+.flow-canvas .drawflow .main-path {
+  stroke: rgba(214, 255, 92, 0.75);
+  stroke-width: 4px;
+}
+
+.flow-canvas .drawflow .connection .main-path:hover,
+.flow-canvas .drawflow .connection .main-path.selected {
+  stroke: var(--accent-2);
+}
+
+.flow-canvas .drawflow .connection .point {
+  fill: var(--panel-2);
+  stroke: var(--accent-2);
+}
+
+.flow-canvas .drawflow-delete {
+  color: #10130e;
+  background: var(--danger);
+  border-color: var(--danger);
 }
 
 .details-body {

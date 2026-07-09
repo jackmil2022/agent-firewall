@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Agent Firewall</title>
+    <link rel="stylesheet" href="../node_modules/drawflow/dist/drawflow.min.css" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -41,13 +42,11 @@
               <strong id="flowStats">0 个节点</strong>
             </div>
             <div class="toolbar-buttons">
-              <button id="linkMode" class="icon-button" type="button" title="连接选中的节点">连线</button>
+              <button id="linkMode" class="icon-button" type="button" title="一键全览">全览</button>
               <button id="clearFlow" class="icon-button" type="button" title="清空画布">清空</button>
             </div>
           </div>
-          <div id="flowCanvas" class="flow-canvas" aria-label="智能体编排画布">
-            <svg id="edgeLayer" class="edge-layer"></svg>
-          </div>
+          <div id="flowCanvas" class="flow-canvas" aria-label="智能体编排画布"></div>
         </section>
 
         <aside class="details">
@@ -70,6 +69,7 @@
         </aside>
       </section>
     </main>
+    <script src="../node_modules/drawflow/dist/drawflow.min.js"></script>
     <script src="./renderer.js"></script>
   </body>
 </html>
