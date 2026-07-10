@@ -118,8 +118,7 @@ h1 {
   box-shadow: 0 0 24px rgba(0, 240, 200, 0.24);
 }
 
-.view-toggle,
-.nav-disabled {
+.view-toggle {
   min-width: 76px;
   padding-inline: 10px;
   border: 0;
@@ -143,41 +142,27 @@ h1 {
   box-shadow: 0 0 24px rgba(0, 213, 255, 0.18), inset 0 -2px 0 var(--accent);
 }
 
-.nav-disabled {
-  opacity: 0.62;
-  cursor: default;
-}
-
-.db-pill,
-.user-pill {
-  border-radius: 999px;
+.db-status {
+  display: inline-flex;
+  align-items: center;
   min-height: 40px;
   padding: 0 14px;
-}
-
-.db-pill {
+  border: 1px solid rgba(0, 240, 200, 0.28);
+  border-radius: 999px;
   color: var(--text);
   background: rgba(0, 240, 200, 0.1);
-  border-color: rgba(0, 240, 200, 0.28);
+  font-size: 13px;
 }
 
-.db-pill::before {
+.db-status::before {
   content: "◉";
   color: var(--accent-2);
   margin-right: 8px;
 }
 
-.round-tool {
-  width: 42px;
-  min-width: 42px;
-  padding: 0;
+#chooseWorkspace {
   border-radius: 999px;
-}
-
-.user-pill {
-  color: var(--text);
-  background: rgba(0, 213, 255, 0.1);
-  border-color: rgba(0, 213, 255, 0.26);
+  min-height: 40px;
 }
 
 .hidden {

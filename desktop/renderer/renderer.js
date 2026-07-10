@@ -68,7 +68,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 function wireEvents() {
   document.querySelectorAll(".view-toggle").forEach((button) => {
     button.addEventListener("click", () => {
-      setActiveView(button.dataset.view);
+      setActiveView(button.dataset.view, button);
       if (button.dataset.tab) setActiveTab(button.dataset.tab);
     });
   });
@@ -110,10 +110,10 @@ function wireEvents() {
     if (!state.workspace || !state.data) return;
     els.startFlow.disabled = true;
     els.runStatus.textContent = "启动中";
-    els.runOutput.textContent = "正在保存编排并启动已配置的智能体...";
+    els.runOutput.textContent = "正在保存并运行当前编排...";
     try {
       const result = await window.agentFirewall.startFlow(state.workspace, currentFlow());
-      els.runStatus.textContent = result.ok ? "已启动" : translateStatus(result.status);
+      els.runStatus.textContent = result.ok ? "运行完成" : translateStatus(result.status);
       els.runOutput.textContent = formatRunResult(result);
       els.workspacePath.textContent = `${state.workspace} / 编排已保存`;
     } catch (error) {
@@ -125,10 +125,11 @@ function wireEvents() {
   });
 
   els.clearFlow.addEventListener("click", () => {
+    if (!window.confirm("重置画布会清空当前编排并保留开始/结束节点。继续吗？")) return;
     state.data.flow = {
       nodes: [
-        { id: "start", type: "start", label: "开始", x: 80, y: 220 },
-        { id: "end", type: "end", label: "结束", x: 980, y: 360 }
+        { id: "start", type: "start", label: "开始", x: 120, y: 220 },
+        { id: "end", type: "end", label: "结束", x: 560, y: 220 }
       ],
       edges: [{ from: "start", to: "end", on: "success" }],
       updatedAt: new Date().toISOString()
@@ -144,7 +145,7 @@ function wireEvents() {
   });
 
   els.zoomOut.addEventListener("click", () => state.editor?.zoom_out());
-  els.zoomReset.addEventListener("click", () => state.editor?.zoom_reset());
+  els.zoomReset.addEventListener("click", () => setEditorView(0, 0, 1));
   els.zoomIn.addEventListener("click", () => state.editor?.zoom_in());
 
   els.flowCanvas.addEventListener("dragover", (event) => event.preventDefault());
@@ -166,12 +167,13 @@ function setActiveTab(tabName) {
   renderInventory();
 }
 
-function setActiveView(view) {
+function setActiveView(view, activeButton = null) {
   state.activeView = view;
   els.flowView.classList.toggle("hidden", view !== "flow");
   els.modelView.classList.toggle("hidden", view !== "model");
+  const target = activeButton || document.querySelector(`.view-toggle[data-view="${view}"]`);
   document.querySelectorAll(".view-toggle").forEach((button) => {
-    button.classList.toggle("active", button.dataset.view === view);
+    button.classList.toggle("active", button === target);
   });
 }
 

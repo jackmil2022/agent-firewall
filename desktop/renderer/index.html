@@ -15,18 +15,13 @@
           <p id="workspacePath">正在加载工作区...</p>
         </div>
         <nav class="main-nav" aria-label="主导航">
-          <button class="view-toggle active" data-view="flow" data-tab="agents" type="button">编排</button>
+          <button class="view-toggle active" data-view="flow" type="button">编排</button>
           <button class="view-toggle" data-view="flow" data-tab="agents" type="button">智能体</button>
           <button class="view-toggle" data-view="model" type="button">模型</button>
-          <button class="nav-disabled" type="button" disabled>防护</button>
-          <button class="nav-disabled" type="button" disabled>观测</button>
-          <button class="nav-disabled" type="button" disabled>分析</button>
         </nav>
         <div class="top-status">
-          <button id="chooseWorkspace" class="db-pill" type="button">SQLite 本地</button>
-          <button class="round-tool" type="button" disabled>⌕</button>
-          <button class="round-tool" type="button" disabled>▣</button>
-          <button class="user-pill" type="button" disabled>A Admin</button>
+          <span class="db-status">SQLite 本地</span>
+          <button id="chooseWorkspace" type="button">打开工作区</button>
         </div>
       </header>
 
@@ -56,15 +51,15 @@
             </div>
             <div class="toolbar-buttons">
               <button id="zoomOut" class="icon-button" type="button" title="缩小">-</button>
-              <button id="zoomReset" class="icon-button" type="button" title="重置缩放">100%</button>
+              <button id="zoomReset" class="icon-button" type="button" title="重置视图">重置视图</button>
               <button id="zoomIn" class="icon-button" type="button" title="放大">+</button>
-              <button id="linkMode" class="icon-button" type="button" title="一键全览">全览</button>
-              <button id="clearFlow" class="icon-button" type="button" title="清空画布">清空</button>
+              <button id="linkMode" class="icon-button" type="button" title="适应画布">适应画布</button>
+              <button id="clearFlow" class="icon-button" type="button" title="重置画布">重置画布</button>
             </div>
           </div>
           <div id="flowCanvas" class="flow-canvas" aria-label="智能体编排画布"></div>
           <div class="canvas-actionbar" aria-label="编排操作">
-            <button id="startFlow" class="run-primary" type="button">启动</button>
+            <button id="startFlow" class="run-primary" type="button">保存并运行</button>
             <button id="saveFlow" type="button">保存编排</button>
           </div>
         </section>
