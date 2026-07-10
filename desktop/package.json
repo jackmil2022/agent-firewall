@@ -27,6 +27,13 @@
       "renderer/**/*",
       "package.json"
     ],
+    "extraResources": [
+      {
+        "from": "../dist",
+        "to": "backend",
+        "filter": ["agent-firewall*"]
+      }
+    ],
     "win": {
       "target": "nsis"
     },

@@ -188,6 +188,12 @@ function runPythonJsonResult(workspace, args, stdin) {
 }
 
 function pythonCommand(workspace) {
+  const packaged = process.resourcesPath && path.join(
+    process.resourcesPath,
+    "backend",
+    process.platform === "win32" ? "agent-firewall.exe" : "agent-firewall"
+  );
+  if (packaged && fs.existsSync(packaged)) return packaged;
   if (process.env.PYTHON) return process.env.PYTHON;
   const local = process.platform === "win32"
     ? path.join(workspace, ".venv", "Scripts", "python.exe")
