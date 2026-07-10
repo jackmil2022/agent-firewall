@@ -11,7 +11,7 @@ from .browser import browser_smoke
 from .config import APP_DIR, AgentFirewallConfig, ConfigError, load_config, load_config_mapping, normalize_config_mapping, write_default_config
 from .engine import EngineError, build_agent_sync
 from .flow import FlowError, load_flow, save_flow
-from .runner import RunnerError, run_flow
+from .runner import RunnerError, resume_flow, run_flow
 from .skills import install_bundled_skills, list_skill_manifests
 from .store import AgentFirewallStore
 
@@ -41,6 +41,10 @@ def main(argv: list[str] | None = None) -> int:
     run_parser.add_argument("--goal", default="Run the configured Agent Firewall flow.")
     run_parser.add_argument("--flow-name", default="default")
     run_parser.add_argument("--flow-path", help="Read a flow JSON file instead of sqlite.")
+
+    resume_parser = subparsers.add_parser("resume", help="Resume a paused flow run.")
+    resume_parser.add_argument("--run-id", required=True)
+    resume_parser.add_argument("--correction", default="")
 
     flow_save_parser = subparsers.add_parser("flow-save", help="Save a flow JSON document to sqlite.")
     flow_save_parser.add_argument("--name", default="default")
@@ -88,6 +92,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "run":
             config = load_config(workspace=workspace)
             result = run_flow(config, goal=args.goal, flow_name=args.flow_name, flow_path=args.flow_path)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+            return 0 if result["status"] == "success" else 1
+        if args.command == "resume":
+            config = load_config(workspace=workspace)
+            result = resume_flow(config, args.run_id, correction=args.correction)
             print(json.dumps(result, indent=2, ensure_ascii=False))
             return 0 if result["status"] == "success" else 1
         if args.command == "flow-save":
@@ -194,6 +203,9 @@ def _workspace_payload(workspace: Path, flow_name: str) -> dict[str, object]:
             "skills": value.get("skills") or [],
             "subagents": value.get("subagents") or [],
             "mcpServers": value.get("mcp_servers") or {},
+            "interruptOn": value.get("interrupt_on") or {},
+            "responseFormat": value.get("response_format"),
+            "checkpoint": value.get("checkpoint", True),
         }
         for key, value in (config_data.get("agents") or {}).items()
     ]

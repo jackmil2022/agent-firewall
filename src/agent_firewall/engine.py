@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import sqlite3
 from pathlib import Path
 from typing import Any, Callable
 
 from .config import AgentFirewallConfig, AgentSpec
 from .skills import normalize_skill_path
+from .store import db_path
 from .tools import BUILTIN_TOOLS
 
 
@@ -87,6 +89,12 @@ def _deepagent_kwargs(
 
     if filesystem_backend and "backend" in params:
         kwargs["backend"] = filesystem_backend(root_dir=Path(config.workspace), virtual_mode=True)
+    if spec.interrupt_on and "interrupt_on" in params:
+        kwargs["interrupt_on"] = spec.interrupt_on
+    if spec.response_format and "response_format" in params:
+        kwargs["response_format"] = spec.response_format
+    if spec.checkpoint and "checkpointer" in params:
+        kwargs["checkpointer"] = _sqlite_checkpointer(config.workspace)
     return {key: value for key, value in kwargs.items() if key in params}
 
 
@@ -97,3 +105,14 @@ def _resolve_model(model: str, config: AgentFirewallConfig | None = None) -> Any
 
         return EchoChatModel()
     return model_value
+
+
+def _sqlite_checkpointer(workspace: Path) -> Any:
+    try:
+        from langgraph.checkpoint.sqlite import SqliteSaver
+    except ImportError as exc:
+        raise EngineError(
+            "Agent checkpointing requires langgraph-checkpoint-sqlite. Run: pip install -e ."
+        ) from exc
+    connection = sqlite3.connect(db_path(workspace), check_same_thread=False)
+    return SqliteSaver(connection)

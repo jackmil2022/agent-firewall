@@ -8,7 +8,8 @@ const state = {
   renderingFlow: false,
   activeView: "flow",
   selectedModelKey: "",
-  canvasPan: null
+  canvasPan: null,
+  lastRun: null
 };
 
 const els = {
@@ -35,6 +36,7 @@ const els = {
   zoomIn: document.querySelector("#zoomIn"),
   runStatus: document.querySelector("#runStatus"),
   runOutput: document.querySelector("#runOutput"),
+  resumeFlow: document.querySelector("#resumeFlow"),
   activeAgentSelect: document.querySelector("#activeAgentSelect"),
   agentModelSelect: document.querySelector("#agentModelSelect"),
   agentNameInput: document.querySelector("#agentNameInput"),
@@ -52,6 +54,9 @@ const els = {
   modelTemperatureInput: document.querySelector("#modelTemperatureInput"),
   modelMaxTokensInput: document.querySelector("#modelMaxTokensInput"),
   systemPromptInput: document.querySelector("#systemPromptInput"),
+  agentCheckpointInput: document.querySelector("#agentCheckpointInput"),
+  agentInterruptInput: document.querySelector("#agentInterruptInput"),
+  agentResponseFormatInput: document.querySelector("#agentResponseFormatInput"),
   acpEnabledInput: document.querySelector("#acpEnabledInput"),
   acpUnstableInput: document.querySelector("#acpUnstableInput"),
   acpBufferInput: document.querySelector("#acpBufferInput"),
@@ -113,14 +118,38 @@ function wireEvents() {
     els.runOutput.textContent = "正在保存并运行当前编排...";
     try {
       const result = await window.agentFirewall.startFlow(state.workspace, currentFlow());
-      els.runStatus.textContent = result.ok ? "运行完成" : translateStatus(result.status);
+      state.lastRun = result.run;
+      els.runStatus.textContent = translateStatus(result.status);
       els.runOutput.textContent = formatRunResult(result);
+      els.resumeFlow.disabled = !["needs_input", "blocked", "failed"].includes(result.status);
       els.workspacePath.textContent = `${state.workspace} / 编排已保存`;
     } catch (error) {
       els.runStatus.textContent = "错误";
       els.runOutput.textContent = error.message;
     } finally {
       els.startFlow.disabled = false;
+    }
+  });
+
+  els.resumeFlow.addEventListener("click", async () => {
+    if (!state.workspace || !state.lastRun?.run_id) return;
+    const correction = window.prompt("输入修正内容或审批 decisions JSON。", "");
+    if (correction === null) return;
+    els.resumeFlow.disabled = true;
+    els.runStatus.textContent = "继续中";
+    try {
+      const result = await window.agentFirewall.resumeFlow(
+        state.workspace,
+        state.lastRun.run_id,
+        correction
+      );
+      state.lastRun = result.run;
+      els.runStatus.textContent = translateStatus(result.status);
+      els.runOutput.textContent = formatRunResult(result);
+      els.resumeFlow.disabled = !["needs_input", "blocked", "failed"].includes(result.status);
+    } catch (error) {
+      els.runStatus.textContent = "错误";
+      els.runOutput.textContent = error.message;
     }
   });
 
@@ -514,6 +543,9 @@ function flowFromEditor() {
     meta: node.data.meta || {}
   }));
   const edgeKeys = new Set();
+  const existingEdges = new Map(
+    (state.data.flow.edges || []).map((edge) => [`${edge.from}->${edge.to}`, edge])
+  );
   const edges = [];
   entries.forEach((node) => {
     Object.values(node.outputs || {}).forEach((output) => {
@@ -523,12 +555,23 @@ function flowFromEditor() {
         const key = `${from}->${to}`;
         if (from && to && from !== to && !edgeKeys.has(key)) {
           edgeKeys.add(key);
-          edges.push({ from, to });
+          const existing = existingEdges.get(key) || {};
+          edges.push({
+            from,
+            to,
+            on: existing.on || "success",
+            pass: Array.isArray(existing.pass) ? existing.pass : []
+          });
         }
       });
     });
   });
-  return { nodes, edges, updatedAt: new Date().toISOString() };
+  return {
+    nodes,
+    edges,
+    limits: state.data.flow.limits || { max_steps: 20, max_loop_iterations: 3 },
+    updatedAt: new Date().toISOString()
+  };
 }
 
 function nodeHtml(node) {
@@ -558,6 +601,7 @@ function renderDetails() {
     return;
   }
   els.selectedType.textContent = translateType(node.type);
+  const outgoing = state.data.flow.edges.filter((edge) => edge.from === node.id);
   els.detailsBody.innerHTML = `
     <h2>${escapeHtml(node.label)}</h2>
     <p>${escapeHtml(node.id)}</p>
@@ -566,8 +610,127 @@ function renderDetails() {
       <div><span>出站连线</span><code>${state.data.flow.edges.filter((edge) => edge.from === node.id).length}</code></div>
       <div><span>入站连线</span><code>${state.data.flow.edges.filter((edge) => edge.to === node.id).length}</code></div>
     </div>
+    ${nodePolicyHtml(node)}
+    ${outgoingEdgesHtml(outgoing)}
     <pre>${escapeHtml(JSON.stringify(node.meta || {}, null, 2))}</pre>
   `;
+  wireNodePolicy(node);
+  wireOutgoingEdges(outgoing);
+}
+
+function nodePolicyHtml(node) {
+  if (node.type === "start" || node.type === "end") return "";
+  const params = node.params || {};
+  const retry = params.retry || {};
+  const validation = JSON.stringify(params.validate || {}, null, 2);
+  const typeFields = [];
+  if (node.type === "skill") {
+    typeFields.push(`
+      <label>脚本<input id="nodeScript" type="text" value="${escapeHtml(params.script || "")}" /></label>
+    `);
+  }
+  if (node.type === "mcp") {
+    typeFields.push(`
+      <label>工具<input id="nodeTool" type="text" value="${escapeHtml(params.tool || "")}" /></label>
+      <label>参数 JSON<textarea id="nodeArgs" rows="5">${escapeHtml(JSON.stringify(params.args || {}, null, 2))}</textarea></label>
+      <label>幂等参数<input id="nodeIdempotencyArg" type="text" value="${escapeHtml(params.idempotency_arg || "")}" /></label>
+    `);
+  }
+  if (node.type === "agent") {
+    typeFields.push(`
+      <label class="detail-check"><input id="nodeRequiresApproval" type="checkbox" ${params.requires_approval ? "checked" : ""} />运行前审批</label>
+    `);
+  }
+  return `
+    <div class="node-policy">
+      <label>超时秒数<input id="nodeTimeout" type="number" min="1" value="${Number(params.timeout_seconds) || 60}" /></label>
+      <label>最大尝试<input id="nodeAttempts" type="number" min="1" value="${Number(retry.max_attempts) || 1}" /></label>
+      <label>重试间隔<input id="nodeRetryDelay" type="number" min="0" step="0.1" value="${Number(retry.delay_seconds) || 0}" /></label>
+      <label class="detail-check"><input id="nodeIdempotent" type="checkbox" ${params.idempotent ? "checked" : ""} />节点可幂等重试</label>
+      ${typeFields.join("")}
+      <label>结果校验 JSON<textarea id="nodeValidation" rows="6">${escapeHtml(validation)}</textarea></label>
+      <button id="applyNodePolicy" type="button">应用节点策略</button>
+    </div>
+  `;
+}
+
+function outgoingEdgesHtml(edges) {
+  if (!edges.length) return "";
+  return `
+    <div class="edge-policies">
+      ${edges.map((edge, index) => `
+        <div class="edge-policy">
+          <code>${escapeHtml(edge.to)}</code>
+          <select data-edge-status="${index}">
+            ${["success", "failed", "needs_input", "blocked", "always"]
+              .map((status) => `<option value="${status}" ${edge.on === status ? "selected" : ""}>${translateStatus(status)}</option>`)
+              .join("")}
+          </select>
+          <input data-edge-pass="${index}" type="text" value="${escapeHtml((edge.pass || []).join(", "))}" placeholder="传递字段" />
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function wireNodePolicy(node) {
+  const button = document.querySelector("#applyNodePolicy");
+  if (!button) return;
+  button.addEventListener("click", () => {
+    let validation;
+    let args;
+    try {
+      validation = JSON.parse(document.querySelector("#nodeValidation")?.value || "{}");
+      args = JSON.parse(document.querySelector("#nodeArgs")?.value || "{}");
+    } catch (error) {
+      els.runStatus.textContent = "配置错误";
+      els.runOutput.textContent = error.message;
+      return;
+    }
+    node.params = {
+      ...(node.params || {}),
+      timeout_seconds: Number(document.querySelector("#nodeTimeout")?.value) || 60,
+      retry: {
+        max_attempts: Number(document.querySelector("#nodeAttempts")?.value) || 1,
+        delay_seconds: Number(document.querySelector("#nodeRetryDelay")?.value) || 0
+      },
+      idempotent: Boolean(document.querySelector("#nodeIdempotent")?.checked),
+      validate: validation
+    };
+    if (node.type === "skill") node.params.script = document.querySelector("#nodeScript")?.value.trim() || "";
+    if (node.type === "mcp") {
+      node.params.tool = document.querySelector("#nodeTool")?.value.trim() || "";
+      node.params.args = args;
+      node.params.idempotency_arg = document.querySelector("#nodeIdempotencyArg")?.value.trim() || "";
+    }
+    if (node.type === "agent") {
+      node.params.requires_approval = Boolean(document.querySelector("#nodeRequiresApproval")?.checked);
+    }
+    updateEditorNodeData(node);
+    scheduleAutosave();
+    renderDetails();
+  });
+}
+
+function wireOutgoingEdges(edges) {
+  edges.forEach((edge, index) => {
+    document.querySelector(`[data-edge-status="${index}"]`)?.addEventListener("change", (event) => {
+      edge.on = event.target.value;
+      scheduleAutosave();
+    });
+    document.querySelector(`[data-edge-pass="${index}"]`)?.addEventListener("change", (event) => {
+      edge.pass = event.target.value.split(",").map((value) => value.trim()).filter(Boolean);
+      scheduleAutosave();
+    });
+  });
+}
+
+function updateEditorNodeData(node) {
+  if (!state.editor) return;
+  const drawflowNode = Object.values(state.editor.drawflow.drawflow.Home.data)
+    .find((item) => item.data?.flowId === node.id);
+  if (!drawflowNode) return;
+  drawflowNode.data.params = node.params || {};
 }
 
 function currentFlow() {
@@ -622,6 +785,11 @@ function renderModelForm() {
     .join("");
   els.agentModelSelect.value = modelKeys.includes(agent.model) ? agent.model : modelKeys[0] || "";
   els.systemPromptInput.value = agent.system_prompt || "";
+  els.agentCheckpointInput.checked = Boolean(agent.checkpoint ?? true);
+  els.agentInterruptInput.value = JSON.stringify(agent.interrupt_on || {}, null, 2);
+  els.agentResponseFormatInput.value = agent.response_format
+    ? JSON.stringify(agent.response_format, null, 2)
+    : "";
   els.mcpServersInput.value = JSON.stringify(agent.mcp_servers || {}, null, 2);
   els.acpEnabledInput.checked = Boolean(config.acp?.enabled ?? true);
   els.acpUnstableInput.checked = Boolean(config.acp?.use_unstable_protocol);
@@ -682,10 +850,16 @@ async function saveModelConfig() {
   }
 
   let mcpServers;
+  let interruptOn;
+  let responseFormat;
   try {
     mcpServers = JSON.parse(els.mcpServersInput.value || "{}");
+    interruptOn = JSON.parse(els.agentInterruptInput.value || "{}");
+    responseFormat = els.agentResponseFormatInput.value.trim()
+      ? JSON.parse(els.agentResponseFormatInput.value)
+      : null;
   } catch (error) {
-    els.modelStatus.textContent = `MCP JSON 无效: ${error.message}`;
+    els.modelStatus.textContent = `JSON 无效: ${error.message}`;
     return;
   }
 
@@ -714,7 +888,10 @@ async function saveModelConfig() {
     name: els.agentNameInput.value.trim() || agentKey,
     model: selectedAgentModel || newModelKey,
     system_prompt: els.systemPromptInput.value,
-    mcp_servers: mcpServers
+    mcp_servers: mcpServers,
+    interrupt_on: interruptOn,
+    response_format: responseFormat,
+    checkpoint: els.agentCheckpointInput.checked
   };
   config.acp = {
     ...(config.acp || {}),
@@ -831,6 +1008,19 @@ function scheduleAutosave() {
 }
 
 function formatRunResult(result) {
+  if (result.run) {
+    const events = (result.run.events || [])
+      .filter((event) => ["node_started", "node_finished", "node_retrying", "run_paused", "run_resumed"].includes(event.event_type))
+      .map((event) => formatRunEvent(event));
+    return [
+      `运行: ${result.run.run_id}`,
+      `状态: ${translateStatus(result.run.status)}`,
+      "",
+      ...events,
+      "",
+      result.run.summary || ""
+    ].join("\n");
+  }
   const lines = [
     `状态: ${translateStatus(result.status)}`,
     `命令: ${result.command}`,
@@ -846,12 +1036,29 @@ function formatRunResult(result) {
   return lines.filter((line) => line !== "").join("\n");
 }
 
+function formatRunEvent(event) {
+  const node = event.node_id ? ` ${event.node_id}` : "";
+  if (event.event_type === "node_finished") {
+    return `[${translateStatus(event.payload.status)}]${node} ${event.payload.summary || ""}`;
+  }
+  if (event.event_type === "node_retrying") {
+    return `[重试]${node} ${event.payload.attempt}/${event.payload.max_attempts}`;
+  }
+  if (event.event_type === "run_paused") return `[暂停]${node} ${event.payload.summary || ""}`;
+  if (event.event_type === "run_resumed") return `[继续]${node}`;
+  return `[开始]${node}`;
+}
+
 function translateStatus(status) {
   const map = {
     idle: "空闲",
     starting: "启动中",
     started: "已启动",
+    success: "成功",
     failed: "失败",
+    needs_input: "等待输入",
+    blocked: "已阻塞",
+    always: "始终",
     error: "错误",
     timeout: "超时"
   };

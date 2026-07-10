@@ -15,6 +15,9 @@ def fake_create_deep_agent(
     subagents=None,
     skills=None,
     backend=None,
+    interrupt_on=None,
+    response_format=None,
+    checkpointer=None,
 ):
     return {
         "model": model,
@@ -23,6 +26,9 @@ def fake_create_deep_agent(
         "subagents": subagents,
         "skills": skills,
         "backend": backend,
+        "interrupt_on": interrupt_on,
+        "response_format": response_format,
+        "checkpointer": checkpointer,
     }
 
 
@@ -51,6 +57,7 @@ def test_deepagent_kwargs_include_customization(tmp_path: Path) -> None:
     assert kwargs["subagents"][0]["name"] == "skill-builder"
     assert kwargs["backend"].root_dir == tmp_path
     assert kwargs["backend"].virtual_mode is True
+    assert kwargs["checkpointer"].__class__.__name__ == "SqliteSaver"
 
 
 def test_deepagent_kwargs_resolve_named_model(tmp_path: Path) -> None:
@@ -73,3 +80,30 @@ def test_deepagent_kwargs_resolve_named_model(tmp_path: Path) -> None:
     )
 
     assert kwargs["model"] == "openai:gpt-5"
+
+
+def test_deepagent_kwargs_include_recovery_config(tmp_path: Path) -> None:
+    write_default_config(tmp_path)
+    install_bundled_skills(tmp_path)
+    from agent_firewall.store import AgentFirewallStore
+
+    data = AgentFirewallStore(tmp_path).get_config()
+    data["agents"]["default"]["interrupt_on"] = {"read_skill_manifest": True}
+    data["agents"]["default"]["response_format"] = {
+        "type": "object",
+        "properties": {"ok": {"type": "boolean"}},
+        "required": ["ok"],
+    }
+    AgentFirewallStore(tmp_path).save_config(data)
+    config = load_config(workspace=tmp_path)
+
+    kwargs = _deepagent_kwargs(
+        fake_create_deep_agent,
+        config,
+        config.active,
+        [agent_policy_check],
+        FakeFilesystemBackend,
+    )
+
+    assert kwargs["interrupt_on"] == {"read_skill_manifest": True}
+    assert kwargs["response_format"]["required"] == ["ok"]

@@ -191,7 +191,7 @@ h1 {
 }
 
 .details {
-  grid-template-rows: auto minmax(250px, 1fr) 240px auto;
+  grid-template-rows: auto minmax(250px, 1fr) minmax(220px, 34vh) auto;
 }
 
 .panel-heading,
@@ -625,7 +625,7 @@ h1 {
   min-height: 0;
   border-top: 1px solid var(--line);
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto 1fr auto;
   background: rgba(1, 8, 13, 0.48);
 }
 
@@ -635,6 +635,60 @@ h1 {
   margin: 0;
   border: 0;
   border-radius: 0;
+}
+
+.run-log > button {
+  margin: 8px 12px 12px;
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.node-policy,
+.edge-policies {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.node-policy label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.node-policy .detail-check {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+}
+
+.node-policy input,
+.node-policy textarea,
+.edge-policy input,
+.edge-policy select {
+  width: 100%;
+  min-width: 0;
+}
+
+.edge-policy {
+  display: grid;
+  grid-template-columns: minmax(80px, 1fr) 110px;
+  gap: 7px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(5, 21, 31, 0.72);
+}
+
+.edge-policy code,
+.edge-policy input {
+  grid-column: 1 / -1;
+  overflow-wrap: anywhere;
 }
 
 .details-body h2 {

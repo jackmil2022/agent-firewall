@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-StepStatus = Literal["success", "failed", "needs_input", "blocked"]
+StepStatus = Literal["success", "failed", "needs_input", "blocked", "skipped"]
 
 
 @dataclass(frozen=True)
@@ -38,6 +38,8 @@ class Handoff:
 class StepResult:
     status: StepStatus
     summary: str
+    output: dict[str, Any] = field(default_factory=dict)
+    error: dict[str, Any] = field(default_factory=dict)
     artifacts: list[dict[str, Any]] = field(default_factory=list)
     handoff: dict[str, Any] = field(default_factory=dict)
 
@@ -45,6 +47,8 @@ class StepResult:
         return {
             "status": self.status,
             "summary": self.summary,
+            "output": self.output,
+            "error": self.error,
             "artifacts": self.artifacts,
             "handoff": self.handoff,
         }
@@ -56,10 +60,17 @@ class TaskPacket:
     goal: str
     node_id: str
     incoming: list[dict[str, Any]] = field(default_factory=list)
+    correction: str = ""
+    correction_kind: str = ""
+    idempotency_key: str = ""
 
     def prompt(self) -> str:
         parts = [f"Goal:\n{self.goal}"]
         if self.incoming:
             parts.append("Incoming handoffs:")
             parts.extend(str(item) for item in self.incoming)
+        if self.correction:
+            parts.append(f"Correction or operator input:\n{self.correction}")
+        if self.idempotency_key:
+            parts.append(f"Idempotency key:\n{self.idempotency_key}")
         return "\n\n".join(parts)

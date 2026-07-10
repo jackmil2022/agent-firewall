@@ -1,4 +1,5 @@
 const { spawn } = require("child_process");
+const fs = require("fs");
 const path = require("path");
 
 async function loadWorkspace(workspace) {
@@ -16,15 +17,31 @@ async function saveConfig(workspace, config) {
 }
 
 async function saveAndStartFlow(workspace, flow) {
-  const saved = await saveFlow(workspace, flow);
-  const started = await startFlow(workspace, saved.path);
-  return { ...started, flowPath: saved.path };
+  await saveFlow(workspace, flow);
+  return startFlow(workspace);
 }
 
-function startFlow(workspace, flowPath) {
+function startFlow(workspace) {
+  return runFlowCommand(workspace, ["-m", "agent_firewall", "run"]);
+}
+
+function resumeFlow(workspace, runId, correction = "") {
+  return runFlowCommand(workspace, [
+    "-m",
+    "agent_firewall",
+    "resume",
+    "--run-id",
+    runId,
+    "--correction",
+    correction
+  ]);
+}
+
+function runFlowCommand(workspace, args) {
   return new Promise((resolve) => {
     const startedAt = new Date().toISOString();
-    const child = spawn(pythonCommand(), ["-m", "agent_firewall", "run"], {
+    const python = pythonCommand(workspace);
+    const child = spawn(python, args, {
       cwd: workspace,
       env: { ...process.env },
       windowsHide: true
@@ -38,7 +55,7 @@ function startFlow(workspace, flowPath) {
         ok: false,
         status: "timeout",
         startedAt,
-        command: `${pythonCommand()} -m agent_firewall run`,
+        command: `${python} ${args.join(" ")}`,
         stdout,
         stderr: `${stderr}\nTimed out after 60 seconds.`.trim()
       });
@@ -56,22 +73,29 @@ function startFlow(workspace, flowPath) {
         ok: false,
         status: "error",
         startedAt,
-        command: `${pythonCommand()} -m agent_firewall run`,
+        command: `${python} ${args.join(" ")}`,
         stdout,
         stderr: error.message
       });
     });
     child.on("close", (code) => {
       clearTimeout(timeout);
+      let run = null;
+      try {
+        run = JSON.parse(stdout);
+      } catch {
+        run = null;
+      }
       resolve({
-        ok: code === 0,
-        status: code === 0 ? "started" : "failed",
+        ok: run?.status === "success",
+        status: run?.status || (code === 0 ? "success" : "failed"),
         code,
         startedAt,
         finishedAt: new Date().toISOString(),
-        command: `${pythonCommand()} -m agent_firewall run`,
+        command: `${python} ${args.join(" ")}`,
         stdout: stdout.trim(),
-        stderr: stderr.trim()
+        stderr: stderr.trim(),
+        run
       });
     });
   });
@@ -79,7 +103,7 @@ function startFlow(workspace, flowPath) {
 
 function runPythonJson(workspace, args, stdin) {
   return new Promise((resolve, reject) => {
-    const child = spawn(pythonCommand(), args, {
+    const child = spawn(pythonCommand(workspace), args, {
       cwd: workspace,
       env: { ...process.env },
       windowsHide: true
@@ -109,8 +133,12 @@ function runPythonJson(workspace, args, stdin) {
   });
 }
 
-function pythonCommand() {
+function pythonCommand(workspace) {
   if (process.env.PYTHON) return process.env.PYTHON;
+  const local = process.platform === "win32"
+    ? path.join(workspace, ".venv", "Scripts", "python.exe")
+    : path.join(workspace, ".venv", "bin", "python");
+  if (fs.existsSync(local)) return local;
   return process.platform === "win32" ? "python" : "python3";
 }
 
@@ -126,5 +154,6 @@ module.exports = {
   saveConfig,
   saveFlow,
   saveAndStartFlow,
-  startFlow
+  startFlow,
+  resumeFlow
 };

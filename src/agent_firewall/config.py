@@ -57,6 +57,9 @@ class AgentSpec:
     tools: list[str] = field(default_factory=list)
     subagents: list[SubAgentSpec] = field(default_factory=list)
     mcp_servers: dict[str, dict[str, Any]] = field(default_factory=dict)
+    interrupt_on: dict[str, bool | dict[str, Any]] = field(default_factory=dict)
+    response_format: dict[str, Any] | None = None
+    checkpoint: bool = True
 
     @classmethod
     def from_mapping(cls, data: dict[str, Any]) -> "AgentSpec":
@@ -72,6 +75,9 @@ class AgentSpec:
             tools=[str(item) for item in data.get("tools", [])],
             subagents=[SubAgentSpec.from_mapping(item) for item in data.get("subagents", [])],
             mcp_servers=dict(data.get("mcp_servers", {})),
+            interrupt_on=dict(data.get("interrupt_on", {})),
+            response_format=dict(data["response_format"]) if isinstance(data.get("response_format"), dict) else None,
+            checkpoint=bool(data.get("checkpoint", True)),
         )
 
 
@@ -177,6 +183,9 @@ def default_config(workspace: Path) -> dict[str, Any]:
                     },
                 ],
                 "mcp_servers": {},
+                "interrupt_on": {},
+                "response_format": None,
+                "checkpoint": True,
             }
         },
         "acp": {

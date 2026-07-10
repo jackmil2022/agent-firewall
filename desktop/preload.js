@@ -5,5 +5,7 @@ contextBridge.exposeInMainWorld("agentFirewall", {
   chooseWorkspace: () => ipcRenderer.invoke("workspace:choose"),
   saveConfig: (workspace, config) => ipcRenderer.invoke("config:save", { workspace, config }),
   saveFlow: (workspace, flow) => ipcRenderer.invoke("flow:save", { workspace, flow }),
-  startFlow: (workspace, flow) => ipcRenderer.invoke("flow:start", { workspace, flow })
+  startFlow: (workspace, flow) => ipcRenderer.invoke("flow:start", { workspace, flow }),
+  resumeFlow: (workspace, runId, correction) =>
+    ipcRenderer.invoke("flow:resume", { workspace, runId, correction })
 });

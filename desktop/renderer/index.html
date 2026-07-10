@@ -76,6 +76,7 @@
               <strong id="runStatus">空闲</strong>
             </div>
             <pre id="runOutput">就绪。</pre>
+            <button id="resumeFlow" type="button" disabled>继续运行</button>
           </div>
           <div class="config-summary">
             <span>ACP</span>
@@ -166,6 +167,20 @@
             <div class="field-row">
               <label for="systemPromptInput">系统提示词</label>
               <textarea id="systemPromptInput" rows="8"></textarea>
+            </div>
+            <div class="field-row inline">
+              <label>
+                <input id="agentCheckpointInput" type="checkbox" />
+                Agent checkpoint
+              </label>
+            </div>
+            <div class="field-row">
+              <label for="agentInterruptInput">工具审批 JSON</label>
+              <textarea id="agentInterruptInput" rows="6" spellcheck="false"></textarea>
+            </div>
+            <div class="field-row">
+              <label for="agentResponseFormatInput">结构化输出 JSON</label>
+              <textarea id="agentResponseFormatInput" rows="6" spellcheck="false"></textarea>
             </div>
           </section>
 

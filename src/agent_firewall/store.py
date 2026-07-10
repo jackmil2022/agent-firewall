@@ -54,7 +54,10 @@ class AgentFirewallStore:
                   status text not null,
                   started_at text not null,
                   finished_at text,
-                  final_summary text
+                  final_summary text,
+                  flow_snapshot text,
+                  state_json text,
+                  parent_run_id text
                 );
 
                 create table if not exists run_events (
@@ -68,6 +71,15 @@ class AgentFirewallStore:
                 );
                 """
             )
+            self._ensure_column(db, "runs", "flow_snapshot", "text")
+            self._ensure_column(db, "runs", "state_json", "text")
+            self._ensure_column(db, "runs", "parent_run_id", "text")
+
+    @staticmethod
+    def _ensure_column(db: sqlite3.Connection, table: str, column: str, sql_type: str) -> None:
+        columns = {row["name"] for row in db.execute(f"pragma table_info({table})")}
+        if column not in columns:
+            db.execute(f"alter table {table} add column {column} {sql_type}")
 
     def get_config(self) -> dict[str, Any] | None:
         with self._connect() as db:
@@ -107,14 +119,22 @@ class AgentFirewallStore:
                 (name, json.dumps(value, ensure_ascii=False), timestamp),
             )
 
-    def create_run(self, run_id: str, goal: str, flow_name: str) -> None:
+    def create_run(
+        self,
+        run_id: str,
+        goal: str,
+        flow_name: str,
+        flow_snapshot: dict[str, Any],
+        *,
+        parent_run_id: str | None = None,
+    ) -> None:
         with self._connect() as db:
             db.execute(
                 """
-                insert into runs(run_id, goal, flow_name, status, started_at)
-                values(?, ?, ?, 'running', ?)
+                insert into runs(run_id, goal, flow_name, status, started_at, flow_snapshot, parent_run_id)
+                values(?, ?, ?, 'running', ?, ?, ?)
                 """,
-                (run_id, goal, flow_name, now_iso()),
+                (run_id, goal, flow_name, now_iso(), json.dumps(flow_snapshot, ensure_ascii=False), parent_run_id),
             )
 
     def log_event(self, run_id: str, event_type: str, payload: dict[str, Any], node_id: str | None = None) -> None:
@@ -137,3 +157,44 @@ class AgentFirewallStore:
                 """,
                 (status, now_iso(), final_summary, run_id),
             )
+
+    def save_checkpoint(self, run_id: str, state: dict[str, Any], *, status: str = "running") -> None:
+        with self._connect() as db:
+            db.execute(
+                "update runs set status = ?, state_json = ? where run_id = ?",
+                (status, json.dumps(state, ensure_ascii=False), run_id),
+            )
+
+    def reopen_run(self, run_id: str) -> None:
+        with self._connect() as db:
+            db.execute(
+                "update runs set status = 'running', finished_at = null where run_id = ?",
+                (run_id,),
+            )
+
+    def get_run(self, run_id: str) -> dict[str, Any] | None:
+        with self._connect() as db:
+            row = db.execute("select * from runs where run_id = ?", (run_id,)).fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        for key in ("flow_snapshot", "state_json"):
+            result[key] = json.loads(result[key]) if result.get(key) else None
+        return result
+
+    def list_events(self, run_id: str) -> list[dict[str, Any]]:
+        with self._connect() as db:
+            rows = db.execute(
+                """
+                select id, run_id, node_id, event_type, payload, created_at
+                from run_events where run_id = ? order by id
+                """,
+                (run_id,),
+            ).fetchall()
+        return [
+            {
+                **dict(row),
+                "payload": json.loads(row["payload"]),
+            }
+            for row in rows
+        ]
