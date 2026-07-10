@@ -67,6 +67,7 @@ def main(argv: list[str] | None = None) -> int:
     test_case_run_parser = subparsers.add_parser("test-case-run", help="Run a saved workbench test case.")
     test_case_run_parser.add_argument("--id", type=int, required=True)
     test_case_run_parser.add_argument("--baseline-run-id")
+    test_case_run_parser.add_argument("--approved", action="store_true")
     subparsers.add_parser("workbench-json", help="Print capability, case, run, revision, and comparison state.")
     preflight_parser = subparsers.add_parser("flow-preflight", help="Validate a flow and return structured issues.")
     preflight_parser.add_argument("--file", help="Read flow JSON from file. Defaults to stdin.")
@@ -152,7 +153,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "test-case-run":
             config = load_config(workspace=workspace)
-            result = run_test_case(config, args.id, baseline_run_id=args.baseline_run_id)
+            result = run_test_case(config, args.id, baseline_run_id=args.baseline_run_id, approved=args.approved)
             print(json.dumps(result, indent=2, ensure_ascii=False))
             return 0 if result["status"] == "success" else 1
         if args.command == "workbench-json":

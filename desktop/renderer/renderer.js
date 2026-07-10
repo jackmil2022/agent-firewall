@@ -91,6 +91,7 @@ const els = {
   ,policyAllowNetwork: document.querySelector("#policyAllowNetwork")
   ,policyCommands: document.querySelector("#policyCommands")
   ,policyExposedEnv: document.querySelector("#policyExposedEnv")
+  ,approveOperation: document.querySelector("#approveOperation")
 };
 
 window.addEventListener("DOMContentLoaded", async () => {
@@ -144,6 +145,7 @@ function wireEvents() {
   els.rerunTestCase?.addEventListener("click", () => executeWorkbenchCase(state.baselineRunId));
   els.testTargetSelect?.addEventListener("change", () => applyTargetDefaults());
   els.savePolicy?.addEventListener("click", () => savePolicyConfig());
+  els.approveOperation?.addEventListener("click", () => executeWorkbenchCase("", true));
 
   els.startFlow.addEventListener("click", async () => {
     if (!state.workspace || !state.data) return;
@@ -1222,13 +1224,13 @@ async function saveWorkbenchCase() {
   return saved;
 }
 
-async function executeWorkbenchCase(baselineRunId = "") {
+async function executeWorkbenchCase(baselineRunId = "", approved = false) {
   try {
     const saved = await saveWorkbenchCase();
     if (!saved) return;
     els.runTestCase.disabled = true;
     els.traceList.innerHTML = '<div class="empty-state"><strong>正在运行...</strong></div>';
-    const result = await window.agentFirewall.runTestCase(state.workspace, saved.id, baselineRunId);
+    const result = await window.agentFirewall.runTestCase(state.workspace, saved.id, baselineRunId, approved);
     if (!state.baselineRunId && result.status === "success") state.baselineRunId = result.run_id;
     renderTestResult(result);
     const refreshed = await window.agentFirewall.loadWorkspace(state.workspace);
@@ -1255,6 +1257,7 @@ function renderTestResult(result) {
   } else {
     els.diagnosisPanel.innerHTML = '<div class="section-title"><span>验收结果</span><span class="status-label success">通过</span></div><p>全部断言通过，可保存为基线或继续回归。</p>';
   }
+  els.approveOperation.disabled = result.status !== "needs_input";
 }
 
 function renderRunHistory(runs) {

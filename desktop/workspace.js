@@ -20,9 +20,10 @@ async function saveTestCase(workspace, testCase) {
   return runPythonJson(workspace, ["-m", "agent_firewall", "test-case-save"], JSON.stringify(testCase));
 }
 
-async function runTestCase(workspace, testCaseId, baselineRunId = "") {
+async function runTestCase(workspace, testCaseId, baselineRunId = "", approved = false) {
   const args = ["-m", "agent_firewall", "test-case-run", "--id", String(testCaseId)];
   if (baselineRunId) args.push("--baseline-run-id", baselineRunId);
+  if (approved) args.push("--approved");
   return runPythonJsonResult(workspace, args);
 }
 

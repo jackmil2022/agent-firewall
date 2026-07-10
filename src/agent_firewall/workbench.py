@@ -12,7 +12,11 @@ from .store import AgentFirewallStore
 
 
 def run_test_case(
-    config: AgentFirewallConfig, test_case_id: int, *, baseline_run_id: str | None = None
+    config: AgentFirewallConfig,
+    test_case_id: int,
+    *,
+    baseline_run_id: str | None = None,
+    approved: bool = False,
 ) -> dict[str, Any]:
     store = AgentFirewallStore(config.workspace)
     case = store.get_test_case(test_case_id)
@@ -30,10 +34,13 @@ def run_test_case(
     store.log_event(run_id, "run_started", {"test_case_id": test_case_id, "goal": case["goal"]})
     store.log_event(run_id, "node_started", {"node": _node_mapping(node)}, node.id)
     try:
-        step = _run_node(
+        from .runner import run_capability_node
+
+        step = run_capability_node(
             config,
             node,
             TaskPacket(run_id=run_id, goal=case["goal"], node_id=node.id, idempotency_key=f"{run_id}:{node.id}"),
+            approved=approved,
         )
     except Exception as exc:
         step_mapping = {
@@ -62,7 +69,7 @@ def run_test_case(
         }
         diagnosis = classify_failure(error)
         store.log_event(run_id, "diagnosis_created", diagnosis, node.id)
-    status = "success" if passed else "failed"
+    status = "success" if passed else str(step_mapping["status"] if step_mapping["status"] in {"needs_input", "blocked"} else "failed")
     summary = step_mapping["summary"] if passed else diagnosis["message"]
     store.finish_run(run_id, status, summary)
     store.log_event(run_id, "run_finished", {"status": status, "summary": summary})

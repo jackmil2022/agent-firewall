@@ -5,8 +5,8 @@ contextBridge.exposeInMainWorld("agentFirewall", {
   chooseWorkspace: () => ipcRenderer.invoke("workspace:choose"),
   saveConfig: (workspace, config) => ipcRenderer.invoke("config:save", { workspace, config }),
   saveTestCase: (workspace, testCase) => ipcRenderer.invoke("test-case:save", { workspace, testCase }),
-  runTestCase: (workspace, testCaseId, baselineRunId) =>
-    ipcRenderer.invoke("test-case:run", { workspace, testCaseId, baselineRunId }),
+  runTestCase: (workspace, testCaseId, baselineRunId, approved) =>
+    ipcRenderer.invoke("test-case:run", { workspace, testCaseId, baselineRunId, approved }),
   preflightFlow: (workspace, flow) => ipcRenderer.invoke("flow:preflight", { workspace, flow }),
   discoverMcpTools: (workspace, agent, server) =>
     ipcRenderer.invoke("mcp:discover", { workspace, agent, server }),

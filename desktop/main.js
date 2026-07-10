@@ -85,7 +85,7 @@ function registerIpc() {
   ipcMain.handle("test-case:save", async (_event, payload) =>
     saveTestCase(path.resolve(payload.workspace), payload.testCase));
   ipcMain.handle("test-case:run", async (_event, payload) =>
-    runTestCase(path.resolve(payload.workspace), payload.testCaseId, payload.baselineRunId));
+    runTestCase(path.resolve(payload.workspace), payload.testCaseId, payload.baselineRunId, payload.approved));
   ipcMain.handle("flow:preflight", async (_event, payload) =>
     preflightFlow(path.resolve(payload.workspace), payload.flow));
   ipcMain.handle("mcp:discover", async (_event, payload) =>
