@@ -99,12 +99,31 @@ class AcpSpec:
 
 
 @dataclass(frozen=True)
+class PolicySpec:
+    require_approval: list[str] = field(default_factory=list)
+    allowed_commands: list[str] = field(default_factory=lambda: ["python"])
+    allow_network: bool = False
+    exposed_env: list[str] = field(default_factory=list)
+
+    @classmethod
+    def from_mapping(cls, data: dict[str, Any] | None) -> "PolicySpec":
+        data = data or {}
+        return cls(
+            require_approval=[str(item) for item in data.get("require_approval", [])],
+            allowed_commands=[str(item) for item in data.get("allowed_commands", ["python"])],
+            allow_network=bool(data.get("allow_network", False)),
+            exposed_env=[str(item) for item in data.get("exposed_env", [])],
+        )
+
+
+@dataclass(frozen=True)
 class AgentFirewallConfig:
     workspace: Path
     active_agent: str
     agents: dict[str, AgentSpec]
     models: dict[str, dict[str, Any]] = field(default_factory=dict)
     acp: AcpSpec = field(default_factory=AcpSpec)
+    policy: PolicySpec = field(default_factory=PolicySpec)
 
     @property
     def active(self) -> AgentSpec:
@@ -129,6 +148,7 @@ class AgentFirewallConfig:
             agents=agents,
             models=_models_from_mapping(data),
             acp=AcpSpec.from_mapping(data.get("acp")),
+            policy=PolicySpec.from_mapping(data.get("policy")),
         )
 
 
@@ -192,6 +212,12 @@ def default_config(workspace: Path) -> dict[str, Any]:
             "enabled": True,
             "use_unstable_protocol": False,
             "stdio_buffer_limit_bytes": 52_428_800,
+        },
+        "policy": {
+            "require_approval": [],
+            "allowed_commands": ["python"],
+            "allow_network": False,
+            "exposed_env": [],
         },
     }
 

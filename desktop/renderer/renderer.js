@@ -85,6 +85,12 @@ const els = {
   ,capabilityList: document.querySelector("#capabilityList")
   ,runHistoryList: document.querySelector("#runHistoryList")
   ,policyWorkspace: document.querySelector("#policyWorkspace")
+  ,savePolicy: document.querySelector("#savePolicy")
+  ,policyScriptApproval: document.querySelector("#policyScriptApproval")
+  ,policyMcpApproval: document.querySelector("#policyMcpApproval")
+  ,policyAllowNetwork: document.querySelector("#policyAllowNetwork")
+  ,policyCommands: document.querySelector("#policyCommands")
+  ,policyExposedEnv: document.querySelector("#policyExposedEnv")
 };
 
 window.addEventListener("DOMContentLoaded", async () => {
@@ -137,6 +143,7 @@ function wireEvents() {
   els.runTestCase?.addEventListener("click", () => executeWorkbenchCase());
   els.rerunTestCase?.addEventListener("click", () => executeWorkbenchCase(state.baselineRunId));
   els.testTargetSelect?.addEventListener("change", () => applyTargetDefaults());
+  els.savePolicy?.addEventListener("click", () => savePolicyConfig());
 
   els.startFlow.addEventListener("click", async () => {
     if (!state.workspace || !state.data) return;
@@ -1102,6 +1109,34 @@ function renderWorkbench() {
   renderTestCaseList(state.data.testCases || []);
   renderRunHistory(state.data.runs || []);
   if (els.policyWorkspace) els.policyWorkspace.value = state.workspace || "";
+  renderPolicyConfig();
+}
+
+function renderPolicyConfig() {
+  const policy = state.data?.config?.policy || {};
+  const approvals = policy.require_approval || [];
+  if (els.policyScriptApproval) els.policyScriptApproval.checked = approvals.includes("script");
+  if (els.policyMcpApproval) els.policyMcpApproval.checked = approvals.includes("mcp:*");
+  if (els.policyAllowNetwork) els.policyAllowNetwork.checked = Boolean(policy.allow_network);
+  if (els.policyCommands) els.policyCommands.value = (policy.allowed_commands || ["python"]).join("\n");
+  if (els.policyExposedEnv) els.policyExposedEnv.value = (policy.exposed_env || []).join("\n");
+}
+
+async function savePolicyConfig() {
+  const config = structuredClone(state.data.config);
+  config.policy = {
+    require_approval: [
+      ...(els.policyScriptApproval.checked ? ["script"] : []),
+      ...(els.policyMcpApproval.checked ? ["mcp:*"] : [])
+    ],
+    allowed_commands: els.policyCommands.value.split("\n").map((item) => item.trim()).filter(Boolean),
+    allow_network: els.policyAllowNetwork.checked,
+    exposed_env: els.policyExposedEnv.value.split("\n").map((item) => item.trim()).filter(Boolean)
+  };
+  await window.agentFirewall.saveConfig(state.workspace, config);
+  state.data.config = config;
+  const status = document.querySelector("#policyStatus strong");
+  if (status) status.textContent = "策略已保存";
 }
 
 function renderCapabilityList(items) {

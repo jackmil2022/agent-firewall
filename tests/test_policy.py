@@ -20,3 +20,9 @@ def test_policy_redacts_configured_environment_secrets(monkeypatch) -> None:
     monkeypatch.setenv("WORK_API_KEY", "super-secret")
 
     assert redact_secrets("failed with super-secret", ["WORK_API_KEY"]) == "failed with [REDACTED]"
+
+
+def test_policy_supports_mcp_wildcard_approval(tmp_path: Path) -> None:
+    policy = ExecutionPolicy(workspace=tmp_path, require_approval=["mcp:*"])
+
+    assert check_operation(policy, kind="mcp:create")["code"] == "approval_required"

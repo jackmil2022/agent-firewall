@@ -376,7 +376,12 @@ def run_capability_node(
     policy: dict[str, Any] | None = None,
     approved: bool = False,
 ) -> StepResult:
-    policy_data = policy or {}
+    policy_data = policy or {
+        "require_approval": config.policy.require_approval,
+        "allowed_commands": config.policy.allowed_commands,
+        "allow_network": config.policy.allow_network,
+        "exposed_env": config.policy.exposed_env,
+    }
     execution_policy = ExecutionPolicy(
         workspace=config.workspace,
         require_approval=[str(item) for item in policy_data.get("require_approval", [])],

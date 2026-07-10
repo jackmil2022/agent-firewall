@@ -234,7 +234,7 @@
                 <span class="eyebrow">执行边界</span>
                 <h2 id="policyTitle">策略</h2>
               </div>
-              <button class="primary-button" type="button">保存策略</button>
+              <button id="savePolicy" class="primary-button" type="button">保存策略</button>
             </header>
             <div class="policy-layout panel-scroll">
               <div id="policyStatus" class="policy-status">
@@ -243,18 +243,19 @@
               </div>
               <section class="settings-band">
                 <header><h3>工具审批</h3><p>高风险命令、写文件和外部调用在执行前暂停。</p></header>
-                <label class="toggle-row"><span><strong>危险命令审批</strong><small>Shell 与脚本动作</small></span><input type="checkbox" checked /></label>
-                <label class="toggle-row"><span><strong>MCP 写操作审批</strong><small>依据 Tool 注解与本地策略</small></span><input type="checkbox" checked /></label>
+                <label class="toggle-row"><span><strong>Script Action 审批</strong><small>脚本执行前暂停</small></span><input id="policyScriptApproval" type="checkbox" /></label>
+                <label class="toggle-row"><span><strong>MCP Tool 审批</strong><small>按工具标识加入审批列表</small></span><input id="policyMcpApproval" type="checkbox" /></label>
               </section>
               <section class="settings-band">
                 <header><h3>资源范围</h3><p>统一约束 Agent、Skill Action 和 MCP Tool。</p></header>
                 <div class="field-row"><label for="policyWorkspace">允许的工作目录</label><input id="policyWorkspace" type="text" readonly /></div>
-                <div class="field-row"><label>允许的网络主机</label><textarea rows="3" placeholder="每行一个主机；留空表示禁止外部网络"></textarea></div>
+                <label class="toggle-row"><span><strong>允许外部网络</strong><small>MCP 远程传输与 Agent 外部访问</small></span><input id="policyAllowNetwork" type="checkbox" /></label>
+                <div class="field-row"><label for="policyCommands">允许的命令</label><textarea id="policyCommands" rows="3" placeholder="每行一个命令"></textarea></div>
               </section>
               <section class="settings-band">
                 <header><h3>审计与密钥</h3><p>运行事件落库，敏感值只记录变量名。</p></header>
                 <label class="toggle-row"><span><strong>记录工具输入输出</strong><small>受脱敏规则约束</small></span><input type="checkbox" checked /></label>
-                <label class="toggle-row"><span><strong>自动脱敏环境变量</strong><small>匹配 TOKEN、KEY、SECRET</small></span><input type="checkbox" checked /></label>
+                <div class="field-row"><label for="policyExposedEnv">允许运行时读取的环境变量名</label><textarea id="policyExposedEnv" rows="3" placeholder="每行一个变量名"></textarea></div>
               </section>
             </div>
           </section>

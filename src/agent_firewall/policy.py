@@ -33,7 +33,10 @@ def check_operation(
         return {"allowed": False, "code": "command_denied", "message": f"Command is not allowed: {command}"}
     if network and not policy.allow_network:
         return {"allowed": False, "code": "network_denied", "message": "Network access is disabled"}
-    if kind in policy.require_approval and not approved:
+    requires_approval = kind in policy.require_approval or (
+        kind.startswith("mcp:") and "mcp:*" in policy.require_approval
+    )
+    if requires_approval and not approved:
         return {"allowed": False, "code": "approval_required", "message": f"Approval required for {kind}"}
     return {"allowed": True, "code": "allowed", "message": "Operation allowed"}
 
