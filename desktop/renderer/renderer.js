@@ -9,7 +9,8 @@ const state = {
   activeView: "flow",
   selectedModelKey: "",
   canvasPan: null,
-  lastRun: null
+  lastRun: null,
+  layoutAdjusted: false
 };
 
 const els = {
@@ -442,12 +443,13 @@ function addAssetNode(asset, x, y) {
   const baseId = `${asset.type}:${asset.id}`;
   const existing = state.data.flow.nodes.filter((node) => node.id.startsWith(baseId)).length;
   const id = existing ? `${baseId}:${existing + 1}` : baseId;
+  const position = findFreeNodePosition(x - 99, y - 42);
   addEditorNode({
     id,
     type: asset.type,
     label: asset.label,
-    x: Math.max(12, x - 99),
-    y: Math.max(12, y - 42),
+    x: position.x,
+    y: position.y,
     meta: asset.meta
   });
   syncFlowFromEditor(true);
@@ -455,10 +457,43 @@ function addAssetNode(asset, x, y) {
   renderDetails();
 }
 
+function findFreeNodePosition(x, y, ignoredDrawflowId = null) {
+  const width = 216;
+  const height = 120;
+  const gap = 28;
+  const start = { x: Math.max(12, x), y: Math.max(12, y) };
+  const boxes = Object.values(state.editor?.drawflow.drawflow.Home.data || {})
+    .filter((node) => String(node.id) !== String(ignoredDrawflowId))
+    .map((node) => {
+      const element = els.flowCanvas.querySelector(`#node-${cssEscape(String(node.id))}`);
+      return {
+        x: node.pos_x,
+        y: node.pos_y,
+        width: element?.offsetWidth || width,
+        height: element?.offsetHeight || height
+      };
+    });
+  for (let row = 0; row < boxes.length + 2; row += 1) {
+    for (let column = 0; column < boxes.length + 2; column += 1) {
+      const candidate = { x: start.x + column * (width + gap), y: start.y + row * (height + gap) };
+      if (!boxes.some((box) => boxesOverlap(candidate, { width, height }, box, gap))) return candidate;
+    }
+  }
+  return start;
+}
+
+function boxesOverlap(position, size, box, gap) {
+  return position.x < box.x + box.width + gap &&
+    position.x + size.width + gap > box.x &&
+    position.y < box.y + box.height + gap &&
+    position.y + size.height + gap > box.y;
+}
+
 function renderCanvas({ fit = false } = {}) {
   const editor = state.editor;
   if (!editor || !state.data) return;
   state.renderingFlow = true;
+  state.layoutAdjusted = false;
   editor.clearModuleSelected();
   const idMap = new Map();
   state.data.flow.nodes.forEach((node) => {
@@ -471,6 +506,7 @@ function renderCanvas({ fit = false } = {}) {
     if (from && to) editor.addConnection(from, to, "output_1", "input_1");
   });
   state.renderingFlow = false;
+  if (state.layoutAdjusted) syncFlowFromEditor(true);
   if (fit) fitEditorView();
   selectEditorNode(state.selectedNodeId);
   els.flowStats.textContent = `${state.data.flow.nodes.length} 个节点 / ${state.data.flow.edges.length} 条连线`;
@@ -481,12 +517,15 @@ function addEditorNode(node) {
   if (!editor) return null;
   const before = new Set(Object.keys(editor.drawflow.drawflow.Home.data));
   const ports = nodePorts(node.type);
+  const requested = { x: Math.max(12, Number(node.x) || 12), y: Math.max(12, Number(node.y) || 12) };
+  const position = findFreeNodePosition(requested.x, requested.y);
+  if (position.x !== requested.x || position.y !== requested.y) state.layoutAdjusted = true;
   editor.addNode(
     node.type,
     ports.inputs,
     ports.outputs,
-    Math.max(12, Number(node.x) || 12),
-    Math.max(12, Number(node.y) || 12),
+    position.x,
+    position.y,
     node.type,
     {
       flowId: node.id,
