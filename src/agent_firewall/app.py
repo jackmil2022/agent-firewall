@@ -8,12 +8,15 @@ from pathlib import Path
 
 from .acp import serve_acp
 from .browser import browser_smoke
+from .capabilities import discover_mcp_tools, list_capabilities
 from .config import APP_DIR, AgentFirewallConfig, ConfigError, load_config, load_config_mapping, normalize_config_mapping, write_default_config
 from .engine import EngineError, build_agent_sync
-from .flow import FlowError, load_flow, save_flow
+from .flow import FlowError, load_flow, preflight_flow, save_flow
 from .runner import RunnerError, resume_flow, run_flow
+from .revisions import apply_revision, create_revision, revert_revision
 from .skills import install_bundled_skills, list_skill_manifests
 from .store import AgentFirewallStore
+from .workbench import compare_test_runs, run_test_case
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -58,6 +61,27 @@ def main(argv: list[str] | None = None) -> int:
 
     config_save_parser = subparsers.add_parser("config-save", help="Save config JSON to sqlite.")
     config_save_parser.add_argument("--file", help="Read config JSON from file. Defaults to stdin.")
+
+    test_case_save_parser = subparsers.add_parser("test-case-save", help="Save a workbench test case.")
+    test_case_save_parser.add_argument("--file", help="Read test case JSON from file. Defaults to stdin.")
+    test_case_run_parser = subparsers.add_parser("test-case-run", help="Run a saved workbench test case.")
+    test_case_run_parser.add_argument("--id", type=int, required=True)
+    test_case_run_parser.add_argument("--baseline-run-id")
+    subparsers.add_parser("workbench-json", help="Print capability, case, run, revision, and comparison state.")
+    preflight_parser = subparsers.add_parser("flow-preflight", help="Validate a flow and return structured issues.")
+    preflight_parser.add_argument("--file", help="Read flow JSON from file. Defaults to stdin.")
+    discover_parser = subparsers.add_parser("mcp-tools", help="Discover tools exposed by a configured MCP server.")
+    discover_parser.add_argument("--agent", required=True)
+    discover_parser.add_argument("--server", required=True)
+    compare_parser = subparsers.add_parser("run-compare", help="Compare candidate and baseline test runs.")
+    compare_parser.add_argument("--baseline", required=True)
+    compare_parser.add_argument("--candidate", required=True)
+    revision_create_parser = subparsers.add_parser("revision-create", help="Create an auditable draft revision.")
+    revision_create_parser.add_argument("--file", help="Read revision JSON from file. Defaults to stdin.")
+    revision_apply_parser = subparsers.add_parser("revision-apply", help="Apply a reviewed revision.")
+    revision_apply_parser.add_argument("--id", type=int, required=True)
+    revision_revert_parser = subparsers.add_parser("revision-revert", help="Revert an applied revision.")
+    revision_revert_parser.add_argument("--id", type=int, required=True)
 
     browser_parser = subparsers.add_parser("browser-smoke", help="Run the initialized browser-control skill smoke test.")
     browser_parser.add_argument("--headed", action="store_true", help="Open a visible browser window.")
@@ -121,6 +145,49 @@ def main(argv: list[str] | None = None) -> int:
             AgentFirewallConfig.from_mapping(data, workspace)
             AgentFirewallStore(workspace).save_config(data)
             print(json.dumps({"ok": True, "database": str(AgentFirewallStore(workspace).path)}, ensure_ascii=False))
+            return 0
+        if args.command == "test-case-save":
+            value = _read_json_payload(args.file)
+            print(json.dumps(AgentFirewallStore(workspace).save_test_case(value), indent=2, ensure_ascii=False))
+            return 0
+        if args.command == "test-case-run":
+            config = load_config(workspace=workspace)
+            result = run_test_case(config, args.id, baseline_run_id=args.baseline_run_id)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+            return 0 if result["status"] == "success" else 1
+        if args.command == "workbench-json":
+            print(json.dumps(_workbench_payload(workspace), indent=2, ensure_ascii=False))
+            return 0
+        if args.command == "flow-preflight":
+            config = load_config(workspace=workspace)
+            result = preflight_flow(_read_json_payload(args.file), config)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+            return 0 if result["valid"] else 1
+        if args.command == "mcp-tools":
+            config = load_config(workspace=workspace)
+            print(json.dumps(discover_mcp_tools(config, args.agent, args.server), indent=2, ensure_ascii=False))
+            return 0
+        if args.command == "run-compare":
+            config = load_config(workspace=workspace)
+            print(json.dumps(compare_test_runs(config, args.baseline, args.candidate), indent=2, ensure_ascii=False))
+            return 0
+        if args.command == "revision-create":
+            config = load_config(workspace=workspace)
+            value = _read_json_payload(args.file)
+            result = create_revision(
+                config,
+                target_type=str(value["target_type"]),
+                target_ref=str(value["target_ref"]),
+                after=dict(value["after"]),
+                reason=str(value["reason"]),
+            )
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+            return 0
+        if args.command == "revision-apply":
+            print(json.dumps(apply_revision(load_config(workspace=workspace), args.id), indent=2, ensure_ascii=False))
+            return 0
+        if args.command == "revision-revert":
+            print(json.dumps(revert_revision(load_config(workspace=workspace), args.id), indent=2, ensure_ascii=False))
             return 0
         if args.command == "browser-smoke":
             result = browser_smoke(headed=args.headed, install_browser=args.install_browser)
@@ -189,6 +256,10 @@ def _read_config_payload(file_path: str | None) -> dict[str, object]:
     return json.loads(sys.stdin.read())
 
 
+def _read_json_payload(file_path: str | None) -> dict[str, object]:
+    return json.loads(Path(file_path).read_text(encoding="utf-8") if file_path else sys.stdin.read())
+
+
 def _workspace_payload(workspace: Path, flow_name: str) -> dict[str, object]:
     config = load_config(workspace=workspace)
     config_data = load_config_mapping(workspace)
@@ -209,6 +280,7 @@ def _workspace_payload(workspace: Path, flow_name: str) -> dict[str, object]:
         }
         for key, value in (config_data.get("agents") or {}).items()
     ]
+    store = AgentFirewallStore(workspace)
     return {
         "workspace": str(workspace),
         "configPath": str(AgentFirewallStore(workspace).path),
@@ -226,4 +298,22 @@ def _workspace_payload(workspace: Path, flow_name: str) -> dict[str, object]:
             for key, value in agent["mcpServers"].items()
         ],
         "flow": load_flow(workspace, config, name=flow_name).to_mapping(),
+        "capabilities": list_capabilities(config),
+        "testCases": store.list_test_cases(),
+        "runs": store.list_runs(),
+        "revisions": store.list_revisions(),
+        "comparisons": store.list_comparisons(),
+    }
+
+
+def _workbench_payload(workspace: Path) -> dict[str, object]:
+    config = load_config(workspace=workspace)
+    store = AgentFirewallStore(workspace)
+    return {
+        "workspace": str(workspace),
+        "capabilities": list_capabilities(config),
+        "testCases": store.list_test_cases(),
+        "runs": store.list_runs(),
+        "revisions": store.list_revisions(),
+        "comparisons": store.list_comparisons(),
     }

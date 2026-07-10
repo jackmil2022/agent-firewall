@@ -11,6 +11,8 @@ const state = {
   canvasPan: null,
   lastRun: null,
   layoutAdjusted: false
+  ,selectedTestCaseId: null
+  ,baselineRunId: null
 };
 
 const els = {
@@ -63,6 +65,26 @@ const els = {
   acpBufferInput: document.querySelector("#acpBufferInput"),
   mcpServersInput: document.querySelector("#mcpServersInput"),
   modelStatus: document.querySelector("#modelStatus")
+  ,workbenchView: document.querySelector("#workbenchView")
+  ,capabilityView: document.querySelector("#capabilityView")
+  ,runsView: document.querySelector("#runsView")
+  ,policyView: document.querySelector("#policyView")
+  ,settingsView: document.querySelector("#settingsView")
+  ,advancedFlowView: document.querySelector("#advancedFlowView")
+  ,testCaseList: document.querySelector("#testCaseList")
+  ,testNameInput: document.querySelector("#testNameInput")
+  ,testTargetSelect: document.querySelector("#testTargetSelect")
+  ,testGoalInput: document.querySelector("#testGoalInput")
+  ,testInputJson: document.querySelector("#testInputJson")
+  ,testAssertionsJson: document.querySelector("#testAssertionsJson")
+  ,saveTestCase: document.querySelector("#saveTestCase")
+  ,runTestCase: document.querySelector("#runTestCase")
+  ,rerunTestCase: document.querySelector("#rerunTestCase")
+  ,traceList: document.querySelector("#traceList")
+  ,diagnosisPanel: document.querySelector("#diagnosisPanel")
+  ,capabilityList: document.querySelector("#capabilityList")
+  ,runHistoryList: document.querySelector("#runHistoryList")
+  ,policyWorkspace: document.querySelector("#policyWorkspace")
 };
 
 window.addEventListener("DOMContentLoaded", async () => {
@@ -111,6 +133,10 @@ function wireEvents() {
   els.activeAgentSelect.addEventListener("change", () => renderModelForm());
   els.addModel.addEventListener("click", () => addModelConfig());
   els.deleteModel.addEventListener("click", () => deleteModelConfig());
+  els.saveTestCase?.addEventListener("click", () => saveWorkbenchCase());
+  els.runTestCase?.addEventListener("click", () => executeWorkbenchCase());
+  els.rerunTestCase?.addEventListener("click", () => executeWorkbenchCase(state.baselineRunId));
+  els.testTargetSelect?.addEventListener("change", () => applyTargetDefaults());
 
   els.startFlow.addEventListener("click", async () => {
     if (!state.workspace || !state.data) return;
@@ -199,8 +225,19 @@ function setActiveTab(tabName) {
 
 function setActiveView(view, activeButton = null) {
   state.activeView = view;
-  els.flowView.classList.toggle("hidden", view !== "flow");
-  els.modelView.classList.toggle("hidden", view !== "model");
+  const views = {
+    workbench: els.workbenchView,
+    capability: els.capabilityView,
+    runs: els.runsView,
+    policy: els.policyView,
+    settings: els.settingsView,
+    advanced: els.advancedFlowView
+  };
+  Object.entries(views).forEach(([key, element]) => {
+    element?.classList.toggle("hidden", key !== view);
+    element?.classList.toggle("active-view", key === view);
+  });
+  if (view === "advanced") setTimeout(() => fitEditorView(), 0);
   const target = activeButton || document.querySelector(`.view-toggle[data-view="${view}"]`);
   document.querySelectorAll(".view-toggle").forEach((button) => {
     button.classList.toggle("active", button === target);
@@ -354,6 +391,7 @@ function setWorkspaceData(data) {
   renderCanvas({ fit: true });
   renderDetails();
   renderModelForm();
+  renderWorkbench();
 }
 
 function inventoryItems() {
@@ -382,22 +420,26 @@ function inventoryItems() {
     }));
   }
   if (state.activeTab === "skills") {
-    return state.data.skills.map((skill) => ({
+    return (state.data.capabilities || []).filter((item) => item.kind === "script_action").map((skill) => ({
       id: skill.id,
       type: "skill",
       label: skill.name,
-      subtitle: skill.path,
-      description: skill.description,
+      subtitle: skill.script,
+      description: "Skill 中明确选择的可执行脚本",
+      ref: skill.ref,
+      params: { script: skill.script },
       meta: skill
     }));
   }
-  return state.data.mcpServers.map((server) => ({
-    id: server.id,
+  return (state.data.capabilities || []).filter((item) => item.kind === "mcp_tool").map((tool) => ({
+    id: tool.id,
     type: "mcp",
-    label: server.key,
-    subtitle: server.agent,
-    description: JSON.stringify(server.config),
-    meta: server
+    label: tool.name,
+    subtitle: tool.ref,
+    description: tool.description,
+    ref: tool.ref,
+    params: { server: tool.ref, tool: tool.name, args: {} },
+    meta: tool
   }));
 }
 
@@ -450,6 +492,8 @@ function addAssetNode(asset, x, y) {
     label: asset.label,
     x: position.x,
     y: position.y,
+    ref: asset.ref || asset.id,
+    params: asset.params || {},
     meta: asset.meta
   });
   syncFlowFromEditor(true);
@@ -1044,6 +1088,159 @@ function scheduleAutosave() {
       els.runOutput.textContent = error.message;
     }
   }, 450);
+}
+
+function renderWorkbench() {
+  if (!state.data) return;
+  const capabilities = state.data.capabilities || [];
+  const targets = capabilities.filter((item) => item.executable);
+  els.testTargetSelect.innerHTML = [
+    '<option value="">选择 Agent、Script Action 或 MCP Tool</option>',
+    ...targets.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)} · ${translateCapabilityKind(item.kind)}</option>`)
+  ].join("");
+  renderCapabilityList(capabilities);
+  renderTestCaseList(state.data.testCases || []);
+  renderRunHistory(state.data.runs || []);
+  if (els.policyWorkspace) els.policyWorkspace.value = state.workspace || "";
+}
+
+function renderCapabilityList(items) {
+  if (!els.capabilityList) return;
+  els.capabilityList.innerHTML = items.length ? items.map((item) => `
+    <article class="capability-item">
+      <div class="capability-kind">${escapeHtml(translateCapabilityKind(item.kind))}</div>
+      <div><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.ref || "")}</small></div>
+      <span class="status-label ${item.health === "available" ? "success" : item.health === "issue" ? "danger" : "neutral"}">
+        ${item.health === "available" ? "可用" : item.health === "issue" ? "有问题" : "未检查"}
+      </span>
+      <code>${item.executable ? "可执行" : "绑定资源"}</code>
+    </article>
+  `).join("") : '<div class="empty-state wide"><strong>没有发现能力</strong></div>';
+}
+
+function renderTestCaseList(cases) {
+  if (!els.testCaseList) return;
+  if (!cases.length) {
+    els.testCaseList.innerHTML = '<button class="test-case-item active" type="button"><span class="status-dot idle"></span><span><strong>新测试用例</strong><small>尚未保存</small></span></button>';
+    return;
+  }
+  els.testCaseList.innerHTML = cases.map((item) => `
+    <button class="test-case-item ${item.id === state.selectedTestCaseId ? "active" : ""}" data-test-id="${item.id}" type="button">
+      <span class="status-dot idle"></span><span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.target_type)}</small></span>
+    </button>
+  `).join("");
+  els.testCaseList.querySelectorAll("[data-test-id]").forEach((button) => button.addEventListener("click", () => selectTestCase(Number(button.dataset.testId))));
+}
+
+function selectTestCase(id) {
+  const item = (state.data.testCases || []).find((test) => test.id === id);
+  if (!item) return;
+  state.selectedTestCaseId = id;
+  els.testNameInput.value = item.name;
+  els.testGoalInput.value = item.goal;
+  const capability = (state.data.capabilities || []).find((candidate) => candidate.kind === item.target_type && candidate.ref === item.target_ref);
+  els.testTargetSelect.value = capability?.id || "";
+  els.testInputJson.value = JSON.stringify(item.input_json || {}, null, 2);
+  els.testAssertionsJson.value = JSON.stringify(item.assertions_json || [], null, 2);
+  renderTestCaseList(state.data.testCases || []);
+}
+
+function applyTargetDefaults() {
+  const capability = selectedCapability();
+  if (!capability) return;
+  const current = parseJsonField(els.testInputJson, {});
+  if (capability.kind === "script_action") current.script = capability.script;
+  if (capability.kind === "mcp_tool") Object.assign(current, { server: capability.ref, tool: capability.name, args: current.args || {} });
+  els.testInputJson.value = JSON.stringify(current, null, 2);
+}
+
+function selectedCapability() {
+  return (state.data?.capabilities || []).find((item) => item.id === els.testTargetSelect?.value);
+}
+
+async function saveWorkbenchCase() {
+  const capability = selectedCapability();
+  if (!capability) return setWorkbenchError("请选择可执行目标能力。");
+  let input;
+  let assertions;
+  try {
+    input = parseJsonField(els.testInputJson, {});
+    assertions = parseJsonField(els.testAssertionsJson, []);
+  } catch (error) {
+    return setWorkbenchError(`JSON 无效: ${error.message}`);
+  }
+  const value = {
+    ...(state.selectedTestCaseId ? { id: state.selectedTestCaseId } : {}),
+    name: els.testNameInput.value.trim() || "未命名测试",
+    target_type: capability.kind,
+    target_ref: capability.ref,
+    goal: els.testGoalInput.value.trim(),
+    input_json: input,
+    assertions_json: assertions
+  };
+  const saved = await window.agentFirewall.saveTestCase(state.workspace, value);
+  state.selectedTestCaseId = saved.id;
+  const index = (state.data.testCases || []).findIndex((item) => item.id === saved.id);
+  if (index >= 0) state.data.testCases[index] = saved;
+  else state.data.testCases.unshift(saved);
+  renderTestCaseList(state.data.testCases);
+  return saved;
+}
+
+async function executeWorkbenchCase(baselineRunId = "") {
+  try {
+    const saved = await saveWorkbenchCase();
+    if (!saved) return;
+    els.runTestCase.disabled = true;
+    els.traceList.innerHTML = '<div class="empty-state"><strong>正在运行...</strong></div>';
+    const result = await window.agentFirewall.runTestCase(state.workspace, saved.id, baselineRunId);
+    if (!state.baselineRunId && result.status === "success") state.baselineRunId = result.run_id;
+    renderTestResult(result);
+    const refreshed = await window.agentFirewall.loadWorkspace(state.workspace);
+    setWorkspaceData(refreshed);
+    state.selectedTestCaseId = saved.id;
+    renderTestResult(result);
+    els.rerunTestCase.disabled = false;
+  } catch (error) {
+    setWorkbenchError(error.message);
+  } finally {
+    els.runTestCase.disabled = false;
+  }
+}
+
+function renderTestResult(result) {
+  els.traceList.innerHTML = (result.events || []).map((event) => `
+    <article class="trace-event">
+      <span class="status-dot ${event.event_type === "run_finished" && event.payload.status === "failed" ? "danger" : "success"}"></span>
+      <div><strong>${escapeHtml(event.event_type)}</strong><small>${escapeHtml(event.node_id || "run")}</small><pre>${escapeHtml(JSON.stringify(event.payload, null, 2))}</pre></div>
+    </article>
+  `).join("");
+  if (result.diagnosis) {
+    els.diagnosisPanel.innerHTML = `<div class="section-title"><span>失败定位</span><span class="status-label danger">${escapeHtml(result.diagnosis.layer)}</span></div><p>${escapeHtml(result.diagnosis.message)}</p>`;
+  } else {
+    els.diagnosisPanel.innerHTML = '<div class="section-title"><span>验收结果</span><span class="status-label success">通过</span></div><p>全部断言通过，可保存为基线或继续回归。</p>';
+  }
+}
+
+function renderRunHistory(runs) {
+  if (!els.runHistoryList) return;
+  els.runHistoryList.innerHTML = runs.length ? runs.map((run) => `
+    <article class="run-history-row"><code>${escapeHtml(run.run_id.slice(0, 8))}</code><span>${escapeHtml(run.goal)}</span><span class="status-label ${run.status === "success" ? "success" : "danger"}">${escapeHtml(translateStatus(run.status))}</span><span>--</span><time>${escapeHtml(run.started_at)}</time></article>
+  `).join("") : '<div class="empty-state wide"><strong>暂无运行记录</strong></div>';
+}
+
+function parseJsonField(element, fallback) {
+  const text = element?.value.trim();
+  return text ? JSON.parse(text) : fallback;
+}
+
+function setWorkbenchError(message) {
+  if (els.diagnosisPanel) els.diagnosisPanel.innerHTML = `<div class="section-title"><span>配置错误</span><span class="status-label danger">阻塞</span></div><p>${escapeHtml(message)}</p>`;
+  return null;
+}
+
+function translateCapabilityKind(kind) {
+  return ({ agent: "Agent", skill: "Skill Binding", script_action: "Script Action", mcp_server: "MCP Server", mcp_tool: "MCP Tool" })[kind] || kind;
 }
 
 function formatRunResult(result) {

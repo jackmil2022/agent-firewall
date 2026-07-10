@@ -11,205 +11,443 @@
     <main class="app-shell">
       <header class="topbar">
         <div class="brand-block">
-          <h1>Agent Firewall</h1>
-          <p id="workspacePath">正在加载工作区...</p>
+          <span class="brand-mark" aria-hidden="true">AF</span>
+          <div>
+            <h1>Agent Firewall</h1>
+            <p id="workspacePath">正在加载工作区...</p>
+          </div>
         </div>
-        <nav class="main-nav" aria-label="主导航">
-          <button class="view-toggle active" data-view="flow" type="button">编排</button>
-          <button class="view-toggle" data-view="flow" data-tab="agents" type="button">智能体</button>
-          <button class="view-toggle" data-view="model" type="button">模型</button>
-        </nav>
         <div class="top-status">
           <span class="db-status">SQLite 本地</span>
-          <button id="chooseWorkspace" type="button">打开工作区</button>
+          <button id="chooseWorkspace" class="secondary-button" type="button">打开工作区</button>
         </div>
       </header>
 
-      <section id="flowView" class="workspace-grid">
-        <aside class="inventory">
-          <div class="panel-heading">
-            <span>资源库</span>
-            <strong id="inventoryCount">0</strong>
-          </div>
-          <div class="tabs" role="tablist">
-            <button class="tab" data-tab="agents" type="button">智能体</button>
-            <button class="tab active" data-tab="models" type="button">模型</button>
-            <button class="tab" data-tab="skills" type="button">技能</button>
-            <button class="tab" data-tab="mcp" type="button">MCP</button>
-          </div>
-          <div class="inventory-search">
-            <input id="inventorySearch" type="search" placeholder="搜索资源..." />
-          </div>
-          <div id="inventoryList" class="inventory-list"></div>
-        </aside>
-
-        <section class="canvas-wrap">
-          <div class="canvas-toolbar">
-            <div>
-              <span class="eyebrow">编排</span>
-              <strong id="flowStats">0 个节点</strong>
-            </div>
-            <div class="toolbar-buttons">
-              <button id="zoomOut" class="icon-button" type="button" title="缩小">-</button>
-              <button id="zoomReset" class="icon-button" type="button" title="重置视图">重置视图</button>
-              <button id="zoomIn" class="icon-button" type="button" title="放大">+</button>
-              <button id="linkMode" class="icon-button" type="button" title="适应画布">适应画布</button>
-              <button id="clearFlow" class="icon-button" type="button" title="重置画布">重置画布</button>
-            </div>
-          </div>
-          <div id="flowCanvas" class="flow-canvas" aria-label="智能体编排画布"></div>
-          <div class="canvas-actionbar" aria-label="编排操作">
-            <button id="startFlow" class="run-primary" type="button">保存并运行</button>
-            <button id="saveFlow" type="button">保存编排</button>
-          </div>
-        </section>
-
-        <aside class="details">
-          <div class="panel-heading">
-            <span>详情</span>
-            <strong id="selectedType">未选择</strong>
-          </div>
-          <div id="detailsBody" class="details-body"></div>
-          <div class="run-log">
-            <div class="panel-heading compact">
-              <span>运行</span>
-              <strong id="runStatus">空闲</strong>
-            </div>
-            <pre id="runOutput">就绪。</pre>
-            <button id="resumeFlow" type="button" disabled>继续运行</button>
-          </div>
-          <div class="config-summary">
-            <span>ACP</span>
-            <code id="acpSummary">-</code>
+      <div class="app-body">
+        <aside class="sidebar">
+          <nav class="main-nav" aria-label="主导航">
+            <button class="view-toggle" data-view="capability" type="button" title="能力库">
+              <span class="nav-icon" aria-hidden="true">◇</span><span>能力库</span>
+            </button>
+            <button class="view-toggle active" data-view="workbench" type="button" title="测试与修复">
+              <span class="nav-icon" aria-hidden="true">▶</span><span>测试与修复</span>
+            </button>
+            <button class="view-toggle" data-view="runs" type="button" title="运行记录">
+              <span class="nav-icon" aria-hidden="true">≡</span><span>运行记录</span>
+            </button>
+            <button class="view-toggle" data-view="policy" type="button" title="策略">
+              <span class="nav-icon" aria-hidden="true">⬡</span><span>策略</span>
+            </button>
+            <button class="view-toggle" data-view="settings" type="button" title="设置">
+              <span class="nav-icon" aria-hidden="true">⚙</span><span>设置</span>
+            </button>
+            <button class="view-toggle" data-view="advanced" type="button" title="高级编排">
+              <span class="nav-icon" aria-hidden="true">⌘</span><span>高级编排</span>
+            </button>
+          </nav>
+          <div class="sidebar-foot">
+            <span class="status-dot success" aria-hidden="true"></span>
+            <span>运行时就绪</span>
           </div>
         </aside>
-      </section>
 
-      <section id="modelView" class="model-page hidden">
-        <div class="model-header">
-          <div>
-            <span class="eyebrow">本地配置</span>
-            <h2>大模型配置</h2>
-          </div>
-          <div class="toolbar-buttons">
-            <button id="reloadConfig" type="button">重新加载</button>
-            <button id="saveConfig" type="button">保存配置</button>
-          </div>
+        <div class="view-stack">
+          <section id="workbenchView" class="app-view active-view" aria-labelledby="workbenchTitle">
+            <header class="view-header">
+              <div>
+                <span class="eyebrow">验证闭环</span>
+                <h2 id="workbenchTitle">测试与修复</h2>
+              </div>
+              <div class="view-context">
+                <span class="status-dot idle" aria-hidden="true"></span>
+                <span>未运行</span>
+              </div>
+            </header>
+
+            <div class="workbench-grid">
+              <aside class="workbench-panel case-panel">
+                <div class="panel-heading">
+                  <div>
+                    <span>测试用例</span>
+                    <strong>定义目标与判定条件</strong>
+                  </div>
+                  <button id="saveTestCase" class="small-button" type="button">保存</button>
+                </div>
+                <div id="testCaseList" class="test-case-list" aria-label="测试用例列表">
+                  <button class="test-case-item active" type="button">
+                    <span class="status-dot idle" aria-hidden="true"></span>
+                    <span><strong>新测试用例</strong><small>尚未保存</small></span>
+                  </button>
+                </div>
+                <div class="case-editor panel-scroll">
+                  <div class="field-row">
+                    <label for="testNameInput">名称</label>
+                    <input id="testNameInput" type="text" autocomplete="off" placeholder="例如：文件检索能力基线" />
+                  </div>
+                  <div class="field-row">
+                    <label for="testTargetSelect">目标能力</label>
+                    <select id="testTargetSelect">
+                      <option value="">选择 Agent、Skill Action 或 MCP Tool</option>
+                    </select>
+                  </div>
+                  <div class="field-row">
+                    <label for="testGoalInput">任务目标</label>
+                    <textarea id="testGoalInput" rows="4" placeholder="描述本次运行要完成的具体任务"></textarea>
+                  </div>
+                  <div class="field-row">
+                    <label for="testInputJson">输入 JSON</label>
+                    <textarea id="testInputJson" class="code-input" rows="6" spellcheck="false">{}</textarea>
+                  </div>
+                  <div class="field-row">
+                    <label for="testAssertionsJson">断言 JSON</label>
+                    <textarea id="testAssertionsJson" class="code-input" rows="6" spellcheck="false">[]</textarea>
+                  </div>
+                </div>
+                <div class="panel-actions">
+                  <button id="runTestCase" class="primary-button" type="button">▶ 运行测试</button>
+                </div>
+              </aside>
+
+              <section class="workbench-panel trace-panel">
+                <div class="panel-heading">
+                  <div>
+                    <span>执行轨迹</span>
+                    <strong>输入、调用与结果证据</strong>
+                  </div>
+                  <span class="status-label neutral">等待运行</span>
+                </div>
+                <div id="traceList" class="trace-list panel-scroll" aria-live="polite">
+                  <div class="empty-state">
+                    <span class="empty-symbol" aria-hidden="true">│</span>
+                    <strong>暂无执行轨迹</strong>
+                    <p>运行测试后，这里按时间显示 Agent 推理、工具调用、策略检查与断言结果。</p>
+                  </div>
+                </div>
+                <footer class="trace-footer">
+                  <span>0 个事件</span>
+                  <span>耗时 --</span>
+                  <span>Token --</span>
+                </footer>
+              </section>
+
+              <aside class="workbench-panel repair-panel">
+                <div class="panel-heading">
+                  <div>
+                    <span>诊断与修改</span>
+                    <strong>基于运行证据修复</strong>
+                  </div>
+                  <span class="status-label neutral">未诊断</span>
+                </div>
+                <div class="repair-scroll panel-scroll">
+                  <section id="diagnosisPanel" class="diagnosis-panel" aria-live="polite">
+                    <div class="section-title">
+                      <span>失败定位</span>
+                      <span class="status-label neutral">--</span>
+                    </div>
+                    <div class="empty-inline">失败后将显示连接、发现、选择、参数、执行、输出、策略或回归问题。</div>
+                  </section>
+                  <section class="evidence-section">
+                    <div class="section-title"><span>证据</span><small>0 项</small></div>
+                    <div class="empty-inline">暂无可核验的运行证据。</div>
+                  </section>
+                  <section class="revision-section">
+                    <div class="section-title"><span>候选修改</span><small>统一 Diff</small></div>
+                    <pre id="revisionDiff" class="revision-diff">尚未生成修改。</pre>
+                  </section>
+                </div>
+                <div class="repair-actions">
+                  <button id="applyRevision" class="primary-button" type="button" disabled>应用修改</button>
+                  <button id="revertRevision" type="button" disabled>撤销</button>
+                  <button id="rerunTestCase" type="button" disabled>重新运行</button>
+                  <button id="abandonRun" class="danger-button" type="button" disabled>放弃运行</button>
+                </div>
+              </aside>
+            </div>
+          </section>
+
+          <section id="capabilityView" class="app-view hidden" aria-labelledby="capabilityTitle">
+            <header class="view-header">
+              <div>
+                <span class="eyebrow">受管资源</span>
+                <h2 id="capabilityTitle">能力库</h2>
+              </div>
+              <div class="header-actions">
+                <input id="capabilitySearch" class="compact-search" type="search" placeholder="搜索 Agent、Skill 或 MCP Tool" />
+                <button class="primary-button" type="button">导入能力</button>
+              </div>
+            </header>
+            <div class="capability-toolbar">
+              <div class="segmented" role="tablist" aria-label="能力类型">
+                <button class="active" type="button">全部</button>
+                <button type="button">Agent</button>
+                <button type="button">Skill</button>
+                <button type="button">MCP Tool</button>
+              </div>
+              <div class="legend">
+                <span><i class="status-dot idle"></i>未检查</span>
+                <span><i class="status-dot success"></i>可用</span>
+                <span><i class="status-dot danger"></i>有问题</span>
+              </div>
+            </div>
+            <div id="capabilityList" class="capability-list panel-scroll">
+              <div class="empty-state wide">
+                <span class="empty-symbol" aria-hidden="true">◇</span>
+                <strong>能力清单将在工作区加载后显示</strong>
+                <p>Agent 展示绑定 Skill 与允许的 Tool；MCP Server 仅作为连接来源，不作为执行目标。</p>
+              </div>
+            </div>
+          </section>
+
+          <section id="runsView" class="app-view hidden" aria-labelledby="runsTitle">
+            <header class="view-header">
+              <div>
+                <span class="eyebrow">可审计证据</span>
+                <h2 id="runsTitle">运行记录</h2>
+              </div>
+              <div class="header-actions">
+                <select class="compact-select" aria-label="运行状态筛选">
+                  <option>全部状态</option>
+                  <option>成功</option>
+                  <option>失败</option>
+                  <option>等待审批</option>
+                </select>
+                <button type="button">刷新</button>
+              </div>
+            </header>
+            <div class="table-shell">
+              <div class="table-head" aria-hidden="true">
+                <span>运行</span><span>测试用例 / 目标</span><span>状态</span><span>耗时</span><span>开始时间</span>
+              </div>
+              <div id="runHistoryList" class="run-history-list panel-scroll">
+                <div class="empty-state wide">
+                  <span class="empty-symbol" aria-hidden="true">≡</span>
+                  <strong>暂无运行记录</strong>
+                  <p>完成首次测试后，可在这里查看事件、输入输出、修改版本和基线对比。</p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section id="policyView" class="app-view hidden" aria-labelledby="policyTitle">
+            <header class="view-header">
+              <div>
+                <span class="eyebrow">执行边界</span>
+                <h2 id="policyTitle">策略</h2>
+              </div>
+              <button class="primary-button" type="button">保存策略</button>
+            </header>
+            <div class="policy-layout panel-scroll">
+              <div id="policyStatus" class="policy-status">
+                <div><span class="status-dot idle"></span><span><strong>策略尚未检查</strong><small>运行健康检查以验证执行边界</small></span></div>
+                <button type="button">运行检查</button>
+              </div>
+              <section class="settings-band">
+                <header><h3>工具审批</h3><p>高风险命令、写文件和外部调用在执行前暂停。</p></header>
+                <label class="toggle-row"><span><strong>危险命令审批</strong><small>Shell 与脚本动作</small></span><input type="checkbox" checked /></label>
+                <label class="toggle-row"><span><strong>MCP 写操作审批</strong><small>依据 Tool 注解与本地策略</small></span><input type="checkbox" checked /></label>
+              </section>
+              <section class="settings-band">
+                <header><h3>资源范围</h3><p>统一约束 Agent、Skill Action 和 MCP Tool。</p></header>
+                <div class="field-row"><label for="policyWorkspace">允许的工作目录</label><input id="policyWorkspace" type="text" readonly /></div>
+                <div class="field-row"><label>允许的网络主机</label><textarea rows="3" placeholder="每行一个主机；留空表示禁止外部网络"></textarea></div>
+              </section>
+              <section class="settings-band">
+                <header><h3>审计与密钥</h3><p>运行事件落库，敏感值只记录变量名。</p></header>
+                <label class="toggle-row"><span><strong>记录工具输入输出</strong><small>受脱敏规则约束</small></span><input type="checkbox" checked /></label>
+                <label class="toggle-row"><span><strong>自动脱敏环境变量</strong><small>匹配 TOKEN、KEY、SECRET</small></span><input type="checkbox" checked /></label>
+              </section>
+            </div>
+          </section>
+
+          <section id="settingsView" class="app-view hidden" aria-labelledby="settingsTitle">
+            <header class="view-header settings-view-header">
+              <div>
+                <span class="eyebrow">本地配置</span>
+                <h2 id="settingsTitle">设置</h2>
+              </div>
+            </header>
+            <section id="modelView" class="model-page">
+              <div class="model-header">
+                <div>
+                  <span class="eyebrow">模型与智能体</span>
+                  <h2>运行配置</h2>
+                </div>
+                <div class="toolbar-buttons">
+                  <button id="reloadConfig" type="button">重新加载</button>
+                  <button id="saveConfig" class="primary-button" type="button">保存配置</button>
+                </div>
+              </div>
+
+              <div class="model-grid">
+                <section class="model-section">
+                  <div class="model-list-head">
+                    <span>模型列表</span>
+                    <strong id="modelCount">0</strong>
+                  </div>
+                  <div id="modelList" class="model-list"></div>
+                  <div class="field-row split">
+                    <button id="addModel" type="button">新增模型</button>
+                    <button id="deleteModel" class="danger-button" type="button">删除模型</button>
+                  </div>
+                </section>
+
+                <section class="model-section">
+                  <h3>模型连接</h3>
+                  <div class="field-row">
+                    <label for="modelKeyInput">模型名字</label>
+                    <input id="modelKeyInput" type="text" autocomplete="off" placeholder="work-gpt5" />
+                  </div>
+                  <div class="field-row">
+                    <label for="modelDisplayNameInput">展示名</label>
+                    <input id="modelDisplayNameInput" type="text" autocomplete="off" placeholder="工作 GPT-5" />
+                  </div>
+                  <div class="field-row">
+                    <label for="modelProviderInput">Provider</label>
+                    <input id="modelProviderInput" type="text" autocomplete="off" placeholder="openai" />
+                  </div>
+                  <div class="field-row">
+                    <label for="modelValueInput">模型 ID</label>
+                    <input id="modelValueInput" type="text" autocomplete="off" placeholder="openai:gpt-5" />
+                  </div>
+                  <div class="field-row">
+                    <label for="modelBaseUrlInput">Base URL</label>
+                    <input id="modelBaseUrlInput" type="text" autocomplete="off" />
+                  </div>
+                  <div class="field-row">
+                    <label for="modelApiKeyEnvInput">API key env</label>
+                    <input id="modelApiKeyEnvInput" type="text" autocomplete="off" placeholder="OPENAI_API_KEY" />
+                  </div>
+                  <div class="field-row inline">
+                    <label class="checkbox-label"><input id="modelEnabledInput" type="checkbox" />启用</label>
+                    <label for="modelTemperatureInput">Temperature<input id="modelTemperatureInput" type="number" min="0" max="2" step="0.1" /></label>
+                  </div>
+                  <div class="field-row">
+                    <label for="modelMaxTokensInput">Max tokens</label>
+                    <input id="modelMaxTokensInput" type="number" min="1" step="1" />
+                  </div>
+                </section>
+
+                <section class="model-section">
+                  <h3>Agent 配置</h3>
+                  <div class="field-row">
+                    <label for="activeAgentSelect">当前智能体</label>
+                    <select id="activeAgentSelect"></select>
+                  </div>
+                  <div class="field-row">
+                    <label for="agentNameInput">名称</label>
+                    <input id="agentNameInput" type="text" autocomplete="off" />
+                  </div>
+                  <div class="field-row">
+                    <label for="agentModelSelect">使用模型名字</label>
+                    <select id="agentModelSelect"></select>
+                  </div>
+                  <div class="field-row">
+                    <label for="systemPromptInput">系统提示词</label>
+                    <textarea id="systemPromptInput" rows="8"></textarea>
+                  </div>
+                  <div class="field-row inline">
+                    <label class="checkbox-label"><input id="agentCheckpointInput" type="checkbox" />Agent checkpoint</label>
+                  </div>
+                  <div class="field-row">
+                    <label for="agentInterruptInput">工具审批 JSON</label>
+                    <textarea id="agentInterruptInput" rows="6" spellcheck="false"></textarea>
+                  </div>
+                  <div class="field-row">
+                    <label for="agentResponseFormatInput">结构化输出 JSON</label>
+                    <textarea id="agentResponseFormatInput" rows="6" spellcheck="false"></textarea>
+                  </div>
+                </section>
+
+                <section class="model-section full-width">
+                  <h3>ACP 与 MCP Server</h3>
+                  <div class="field-row inline">
+                    <label class="checkbox-label"><input id="acpEnabledInput" type="checkbox" />ACP 启用</label>
+                    <label class="checkbox-label"><input id="acpUnstableInput" type="checkbox" />unstable protocol</label>
+                  </div>
+                  <div class="field-row">
+                    <label for="acpBufferInput">stdio buffer bytes</label>
+                    <input id="acpBufferInput" type="number" min="1024" step="1024" />
+                  </div>
+                  <div class="field-row">
+                    <label for="mcpServersInput">MCP servers JSON</label>
+                    <textarea id="mcpServersInput" rows="10" spellcheck="false"></textarea>
+                  </div>
+                  <div class="field-row">
+                    <label for="modelStatus">状态</label>
+                    <pre id="modelStatus">就绪。</pre>
+                  </div>
+                </section>
+              </div>
+            </section>
+          </section>
+
+          <section id="advancedFlowView" class="app-view hidden" aria-labelledby="advancedTitle">
+            <header class="view-header">
+              <div>
+                <span class="eyebrow">高级模式</span>
+                <h2 id="advancedTitle">编排画布</h2>
+              </div>
+              <span class="view-note">用于多能力执行路径；测试闭环仍在“测试与修复”中完成</span>
+            </header>
+            <section id="flowView" class="workspace-grid">
+              <aside class="inventory">
+                <div class="panel-heading">
+                  <div><span>资源库</span><strong>拖入画布</strong></div>
+                  <strong id="inventoryCount">0</strong>
+                </div>
+                <div class="tabs" role="tablist">
+                  <button class="tab" data-tab="agents" type="button">智能体</button>
+                  <button class="tab active" data-tab="models" type="button">模型</button>
+                  <button class="tab" data-tab="skills" type="button">技能</button>
+                  <button class="tab" data-tab="mcp" type="button">MCP</button>
+                </div>
+                <div class="inventory-search">
+                  <input id="inventorySearch" type="search" placeholder="搜索资源..." />
+                </div>
+                <div id="inventoryList" class="inventory-list"></div>
+              </aside>
+
+              <section class="canvas-wrap">
+                <div class="canvas-toolbar">
+                  <div><span class="eyebrow">当前流程</span><strong id="flowStats">0 个节点</strong></div>
+                  <div class="toolbar-buttons">
+                    <button id="zoomOut" class="icon-button" type="button" title="缩小" aria-label="缩小">−</button>
+                    <button id="zoomReset" class="icon-button" type="button" title="重置缩放" aria-label="重置缩放">1:1</button>
+                    <button id="zoomIn" class="icon-button" type="button" title="放大" aria-label="放大">+</button>
+                    <button id="linkMode" class="icon-button" type="button" title="适应画布">适应</button>
+                    <button id="clearFlow" class="icon-button danger-button" type="button" title="重置画布">重置</button>
+                  </div>
+                </div>
+                <div id="flowCanvas" class="flow-canvas" aria-label="智能体编排画布"></div>
+                <div class="canvas-actionbar" aria-label="编排操作">
+                  <button id="saveFlow" type="button">保存编排</button>
+                  <button id="startFlow" class="primary-button" type="button">▶ 保存并运行</button>
+                </div>
+              </section>
+
+              <aside class="details">
+                <div class="panel-heading">
+                  <div><span>节点详情</span><strong>参数与策略</strong></div>
+                  <strong id="selectedType">未选择</strong>
+                </div>
+                <div id="detailsBody" class="details-body"></div>
+                <div class="run-log">
+                  <div class="panel-heading compact">
+                    <span>运行</span>
+                    <strong id="runStatus">空闲</strong>
+                  </div>
+                  <pre id="runOutput">就绪。</pre>
+                  <button id="resumeFlow" type="button" disabled>继续运行</button>
+                </div>
+                <div class="config-summary">
+                  <span>ACP</span>
+                  <code id="acpSummary">-</code>
+                </div>
+              </aside>
+            </section>
+          </section>
         </div>
-
-        <div class="model-grid">
-          <section class="model-section">
-            <div class="model-list-head">
-              <span>模型列表</span>
-              <strong id="modelCount">0</strong>
-            </div>
-            <div id="modelList" class="model-list"></div>
-            <div class="field-row split">
-              <button id="addModel" type="button">新增模型</button>
-              <button id="deleteModel" type="button">删除模型</button>
-            </div>
-          </section>
-
-          <section class="model-section">
-            <div class="field-row">
-              <label for="modelKeyInput">模型名字</label>
-              <input id="modelKeyInput" type="text" autocomplete="off" placeholder="work-gpt5" />
-            </div>
-            <div class="field-row">
-              <label for="modelDisplayNameInput">展示名</label>
-              <input id="modelDisplayNameInput" type="text" autocomplete="off" placeholder="工作 GPT-5" />
-            </div>
-            <div class="field-row">
-              <label for="modelProviderInput">Provider</label>
-              <input id="modelProviderInput" type="text" autocomplete="off" placeholder="openai" />
-            </div>
-            <div class="field-row">
-              <label for="modelValueInput">模型 ID</label>
-              <input id="modelValueInput" type="text" autocomplete="off" placeholder="openai:gpt-5" />
-            </div>
-            <div class="field-row">
-              <label for="modelBaseUrlInput">Base URL</label>
-              <input id="modelBaseUrlInput" type="text" autocomplete="off" />
-            </div>
-            <div class="field-row">
-              <label for="modelApiKeyEnvInput">API key env</label>
-              <input id="modelApiKeyEnvInput" type="text" autocomplete="off" placeholder="OPENAI_API_KEY" />
-            </div>
-            <div class="field-row inline">
-              <label>
-                <input id="modelEnabledInput" type="checkbox" />
-                启用
-              </label>
-              <label for="modelTemperatureInput">
-                Temperature
-                <input id="modelTemperatureInput" type="number" min="0" max="2" step="0.1" />
-              </label>
-            </div>
-            <div class="field-row">
-              <label for="modelMaxTokensInput">Max tokens</label>
-              <input id="modelMaxTokensInput" type="number" min="1" step="1" />
-            </div>
-          </section>
-
-          <section class="model-section">
-            <div class="field-row">
-              <label for="activeAgentSelect">当前智能体</label>
-              <select id="activeAgentSelect"></select>
-            </div>
-            <div class="field-row">
-              <label for="agentNameInput">名称</label>
-              <input id="agentNameInput" type="text" autocomplete="off" />
-            </div>
-            <div class="field-row">
-              <label for="agentModelSelect">使用模型名字</label>
-              <select id="agentModelSelect"></select>
-            </div>
-            <div class="field-row">
-              <label for="systemPromptInput">系统提示词</label>
-              <textarea id="systemPromptInput" rows="8"></textarea>
-            </div>
-            <div class="field-row inline">
-              <label>
-                <input id="agentCheckpointInput" type="checkbox" />
-                Agent checkpoint
-              </label>
-            </div>
-            <div class="field-row">
-              <label for="agentInterruptInput">工具审批 JSON</label>
-              <textarea id="agentInterruptInput" rows="6" spellcheck="false"></textarea>
-            </div>
-            <div class="field-row">
-              <label for="agentResponseFormatInput">结构化输出 JSON</label>
-              <textarea id="agentResponseFormatInput" rows="6" spellcheck="false"></textarea>
-            </div>
-          </section>
-
-          <section class="model-section full-width">
-            <div class="field-row inline">
-              <label>
-                <input id="acpEnabledInput" type="checkbox" />
-                ACP 启用
-              </label>
-              <label>
-                <input id="acpUnstableInput" type="checkbox" />
-                unstable protocol
-              </label>
-            </div>
-            <div class="field-row">
-              <label for="acpBufferInput">stdio buffer bytes</label>
-              <input id="acpBufferInput" type="number" min="1024" step="1024" />
-            </div>
-            <div class="field-row">
-              <label for="mcpServersInput">MCP servers JSON</label>
-              <textarea id="mcpServersInput" rows="10" spellcheck="false"></textarea>
-            </div>
-            <div class="field-row">
-              <label for="modelStatus">状态</label>
-              <pre id="modelStatus">就绪。</pre>
-            </div>
-          </section>
-        </div>
-      </section>
+      </div>
     </main>
     <script src="../node_modules/drawflow/dist/drawflow.min.js"></script>
     <script src="./renderer.js"></script>

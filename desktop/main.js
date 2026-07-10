@@ -1,6 +1,20 @@
 const { app, BrowserWindow, ipcMain, dialog, Menu } = require("electron");
 const path = require("path");
-const { loadWorkspace, saveConfig, saveFlow, saveAndStartFlow, resumeFlow } = require("./workspace");
+const {
+  loadWorkspace,
+  saveConfig,
+  saveFlow,
+  saveAndStartFlow,
+  resumeFlow,
+  saveTestCase,
+  runTestCase,
+  preflightFlow,
+  discoverMcpTools,
+  compareRuns,
+  createRevision,
+  applyRevision,
+  revertRevision
+} = require("./workspace");
 
 let mainWindow;
 
@@ -67,6 +81,23 @@ function registerIpc() {
     const workspace = path.resolve(payload.workspace);
     return saveConfig(workspace, payload.config);
   });
+
+  ipcMain.handle("test-case:save", async (_event, payload) =>
+    saveTestCase(path.resolve(payload.workspace), payload.testCase));
+  ipcMain.handle("test-case:run", async (_event, payload) =>
+    runTestCase(path.resolve(payload.workspace), payload.testCaseId, payload.baselineRunId));
+  ipcMain.handle("flow:preflight", async (_event, payload) =>
+    preflightFlow(path.resolve(payload.workspace), payload.flow));
+  ipcMain.handle("mcp:discover", async (_event, payload) =>
+    discoverMcpTools(path.resolve(payload.workspace), payload.agent, payload.server));
+  ipcMain.handle("run:compare", async (_event, payload) =>
+    compareRuns(path.resolve(payload.workspace), payload.baseline, payload.candidate));
+  ipcMain.handle("revision:create", async (_event, payload) =>
+    createRevision(path.resolve(payload.workspace), payload.revision));
+  ipcMain.handle("revision:apply", async (_event, payload) =>
+    applyRevision(path.resolve(payload.workspace), payload.revisionId));
+  ipcMain.handle("revision:revert", async (_event, payload) =>
+    revertRevision(path.resolve(payload.workspace), payload.revisionId));
 
   ipcMain.handle("flow:start", async (_event, payload) => {
     const workspace = path.resolve(payload.workspace);

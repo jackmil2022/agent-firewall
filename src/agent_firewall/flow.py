@@ -299,6 +299,42 @@ def save_flow(workspace: str | Path, flow: dict[str, Any], *, name: str = "defau
     return store.path
 
 
+def preflight_flow(data: dict[str, Any], config: AgentFirewallConfig) -> dict[str, Any]:
+    skill_issue = next(
+        (
+            FlowNode.from_mapping(raw_node)
+            for raw_node in data.get("nodes", [])
+            if str(raw_node.get("type") or "") == "skill"
+            and not dict(raw_node.get("params") or {}).get("script")
+        ),
+        None,
+    )
+    if skill_issue:
+        return {
+            "valid": False,
+            "issues": [
+                {
+                    "node_id": skill_issue.id,
+                    "field": "params.script",
+                    "code": "skill_script_required",
+                    "message": (
+                        "Skill bindings are Agent resources. Select a script to create an executable "
+                        "Script action."
+                    ),
+                }
+            ],
+        }
+    try:
+        flow = FlowSpec.from_mapping(data)
+        validate_flow(flow, config, check_resources=True)
+    except FlowError as exc:
+        return {
+            "valid": False,
+            "issues": [{"node_id": "", "field": "", "code": "invalid_flow", "message": str(exc)}],
+        }
+    return {"valid": True, "issues": []}
+
+
 def default_flow(config: AgentFirewallConfig) -> dict[str, Any]:
     nodes: list[dict[str, Any]] = [
         {

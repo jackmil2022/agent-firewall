@@ -14,6 +14,7 @@ from .config import APP_DIR, AgentFirewallConfig
 from .engine import build_agent_sync
 from .flow import FlowEdge, FlowNode, FlowSpec, load_flow, validate_flow
 from .handoff import Handoff, StepResult, TaskPacket
+from .policy import ExecutionPolicy, check_operation
 from .skills import _read_manifest
 from .store import AgentFirewallStore
 
@@ -364,6 +365,42 @@ def _run_result(
 
 
 def _run_node(config: AgentFirewallConfig, node: FlowNode, packet: TaskPacket) -> StepResult:
+    return run_capability_node(config, node, packet)
+
+
+def run_capability_node(
+    config: AgentFirewallConfig,
+    node: FlowNode,
+    packet: TaskPacket,
+    *,
+    policy: dict[str, Any] | None = None,
+    approved: bool = False,
+) -> StepResult:
+    policy_data = policy or {}
+    execution_policy = ExecutionPolicy(
+        workspace=config.workspace,
+        require_approval=[str(item) for item in policy_data.get("require_approval", [])],
+        allowed_commands=[str(item) for item in policy_data.get("allowed_commands", ["python"])],
+        allow_network=bool(policy_data.get("allow_network", False)),
+        exposed_env=[str(item) for item in policy_data.get("exposed_env", [])],
+    )
+    operation = node.type
+    target_path = None
+    if node.type == "skill":
+        operation = "script"
+        skill_dir = _resolve_path(config.workspace, node.ref or str(node.meta.get("path") or ""))
+        target_path = skill_dir / str(node.params.get("script") or "")
+    elif node.type == "mcp":
+        operation = f"mcp:{node.params.get('tool') or 'call'}"
+    decision = check_operation(execution_policy, kind=operation, path=target_path, approved=approved)
+    if not decision["allowed"]:
+        status = "needs_input" if decision["code"] == "approval_required" else "blocked"
+        return StepResult(
+            status=status,
+            summary=decision["message"],
+            output={"pause": {"kind": "policy_approval", "operation": operation}},
+            error={"code": decision["code"], "message": decision["message"], "retryable": False},
+        )
     if node.type in ("start", "end"):
         return _run_boundary_node(node, packet)
     if node.type == "agent":

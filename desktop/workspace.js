@@ -16,6 +16,40 @@ async function saveConfig(workspace, config) {
   return runPythonJson(workspace, ["-m", "agent_firewall", "config-save"], JSON.stringify(config));
 }
 
+async function saveTestCase(workspace, testCase) {
+  return runPythonJson(workspace, ["-m", "agent_firewall", "test-case-save"], JSON.stringify(testCase));
+}
+
+async function runTestCase(workspace, testCaseId, baselineRunId = "") {
+  const args = ["-m", "agent_firewall", "test-case-run", "--id", String(testCaseId)];
+  if (baselineRunId) args.push("--baseline-run-id", baselineRunId);
+  return runPythonJsonResult(workspace, args);
+}
+
+async function preflightFlow(workspace, flow) {
+  return runPythonJsonResult(workspace, ["-m", "agent_firewall", "flow-preflight"], JSON.stringify(flow));
+}
+
+async function discoverMcpTools(workspace, agent, server) {
+  return runPythonJson(workspace, ["-m", "agent_firewall", "mcp-tools", "--agent", agent, "--server", server]);
+}
+
+async function compareRuns(workspace, baseline, candidate) {
+  return runPythonJson(workspace, ["-m", "agent_firewall", "run-compare", "--baseline", baseline, "--candidate", candidate]);
+}
+
+async function createRevision(workspace, revision) {
+  return runPythonJson(workspace, ["-m", "agent_firewall", "revision-create"], JSON.stringify(revision));
+}
+
+async function applyRevision(workspace, revisionId) {
+  return runPythonJson(workspace, ["-m", "agent_firewall", "revision-apply", "--id", String(revisionId)]);
+}
+
+async function revertRevision(workspace, revisionId) {
+  return runPythonJson(workspace, ["-m", "agent_firewall", "revision-revert", "--id", String(revisionId)]);
+}
+
 async function saveAndStartFlow(workspace, flow) {
   await saveFlow(workspace, flow);
   return startFlow(workspace);
@@ -133,6 +167,26 @@ function runPythonJson(workspace, args, stdin) {
   });
 }
 
+function runPythonJsonResult(workspace, args, stdin) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(pythonCommand(workspace), args, { cwd: workspace, env: { ...process.env }, windowsHide: true });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
+    child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
+    child.on("error", reject);
+    child.on("close", () => {
+      try {
+        resolve(JSON.parse(stdout));
+      } catch (error) {
+        reject(new Error(stderr.trim() || `invalid json from python: ${error.message}`));
+      }
+    });
+    if (stdin) child.stdin.write(stdin);
+    child.stdin.end();
+  });
+}
+
 function pythonCommand(workspace) {
   if (process.env.PYTHON) return process.env.PYTHON;
   const local = process.platform === "win32"
@@ -152,6 +206,14 @@ function assertInsideWorkspace(workspace, target) {
 module.exports = {
   loadWorkspace,
   saveConfig,
+  saveTestCase,
+  runTestCase,
+  preflightFlow,
+  discoverMcpTools,
+  compareRuns,
+  createRevision,
+  applyRevision,
+  revertRevision,
   saveFlow,
   saveAndStartFlow,
   startFlow,

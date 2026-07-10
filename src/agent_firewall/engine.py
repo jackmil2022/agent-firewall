@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import os
 import sqlite3
 from pathlib import Path
 from typing import Any, Callable
 
-from .config import AgentFirewallConfig, AgentSpec
+from .config import AgentFirewallConfig, AgentSpec, ConfigError
 from .skills import normalize_skill_path
 from .store import db_path
 from .tools import BUILTIN_TOOLS
@@ -99,11 +100,31 @@ def _deepagent_kwargs(
 
 
 def _resolve_model(model: str, config: AgentFirewallConfig | None = None) -> Any:
-    model_value = str((config.models.get(model) or {}).get("model") or model) if config else model
+    preset = (config.models.get(model) or {}) if config else {}
+    model_value = str(preset.get("model") or model)
     if model_value == "fake:echo":
         from .fake_model import EchoChatModel
 
         return EchoChatModel()
+    if preset:
+        if preset.get("enabled", True) is False:
+            raise ConfigError(f"model preset '{model}' is disabled")
+        provider, separator, model_id = model_value.partition(":")
+        needs_client = bool(preset.get("base_url") or preset.get("api_key_env") or preset.get("params"))
+        if provider == "openai" and separator and needs_client:
+            from langchain_openai import ChatOpenAI
+
+            api_key_env = str(preset.get("api_key_env") or "")
+            api_key = os.environ.get(api_key_env) if api_key_env else None
+            if api_key_env and not api_key:
+                raise ConfigError(f"model preset '{model}' requires environment variable {api_key_env}")
+            kwargs = dict(preset.get("params") or {})
+            kwargs["model"] = model_id
+            if preset.get("base_url"):
+                kwargs["base_url"] = str(preset["base_url"])
+            if api_key:
+                kwargs["api_key"] = api_key
+            return ChatOpenAI(**kwargs)
     return model_value
 
 
