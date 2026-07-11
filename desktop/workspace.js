@@ -18,6 +18,10 @@ async function saveConfig(workspace, config) {
   return runPythonJson(workspace, ["-m", "agent_firewall", "config-save"], JSON.stringify(config));
 }
 
+async function testModelConnection(workspace) {
+  return runPythonJson(workspace, ["-m", "agent_firewall", "model-test"]);
+}
+
 async function saveTestCase(workspace, testCase) {
   return runPythonJson(workspace, ["-m", "agent_firewall", "test-case-save"], JSON.stringify(testCase));
 }
@@ -77,15 +81,20 @@ async function revertRevision(workspace, revisionId) {
   return runPythonJson(workspace, ["-m", "agent_firewall", "revision-revert", "--id", String(revisionId)]);
 }
 
-async function saveAndStartFlow(workspace, flow, operationId = "") {
+async function saveAndStartFlow(workspace, flow, goal = "", operationId = "") {
   await saveFlow(workspace, flow);
-  return startFlow(workspace, operationId);
+  return startFlow(workspace, goal, operationId);
 }
 
-function startFlow(workspace, operationId = "") {
+function startFlow(workspace, goal = "", operationId = "") {
+  return runFlowCommand(workspace, flowRunArgs(goal, operationId), operationId);
+}
+
+function flowRunArgs(goal = "", operationId = "") {
   const args = ["-m", "agent_firewall", "run"];
+  if (goal) args.push("--goal", goal);
   if (operationId) args.push("--run-id", operationId);
-  return runFlowCommand(workspace, args, operationId);
+  return args;
 }
 
 function resumeFlow(workspace, runId, correction = "", operationId = "") {
@@ -334,6 +343,7 @@ function assertInsideWorkspace(workspace, target) {
 module.exports = {
   loadWorkspace,
   saveConfig,
+  testModelConnection,
   saveTestCase,
   setTestBaseline,
   runTestCase,
@@ -351,5 +361,6 @@ module.exports = {
   resumeFlow,
   cancelOperation,
   backendArgs,
+  flowRunArgs,
   pythonCommand
 };

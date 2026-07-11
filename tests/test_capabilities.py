@@ -38,7 +38,7 @@ def test_capability_inventory_marks_agent_with_missing_model_key(tmp_path: Path)
     assert agent["health_issue"] is None
 
 
-def test_capability_inventory_reports_disabled_and_uncredentialed_models(
+def test_capability_inventory_reports_uncredentialed_models(
     tmp_path: Path, monkeypatch
 ) -> None:
     write_default_config(tmp_path)
@@ -46,15 +46,6 @@ def test_capability_inventory_reports_disabled_and_uncredentialed_models(
 
     store = AgentFirewallStore(tmp_path)
     data = store.get_config()
-    data["models"]["fake-echo"]["enabled"] = False
-    store.save_config(data)
-
-    disabled = next(
-        item for item in list_capabilities(load_config(workspace=tmp_path)) if item["kind"] == "agent"
-    )
-    assert disabled["health_issue"] == "model_disabled"
-
-    data["models"]["fake-echo"]["enabled"] = True
     data["models"]["fake-echo"]["api_key_env"] = "AGENT_FIREWALL_TEST_KEY"
     store.save_config(data)
     monkeypatch.delenv("AGENT_FIREWALL_TEST_KEY", raising=False)

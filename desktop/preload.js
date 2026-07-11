@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld("agentFirewall", {
   loadWorkspace: (workspace) => ipcRenderer.invoke("workspace:load", workspace),
   chooseWorkspace: () => ipcRenderer.invoke("workspace:choose"),
   saveConfig: (workspace, config) => ipcRenderer.invoke("config:save", { workspace, config }),
+  testModelConnection: (workspace) => ipcRenderer.invoke("model:test", workspace),
   saveTestCase: (workspace, testCase) => ipcRenderer.invoke("test-case:save", { workspace, testCase }),
   setTestBaseline: (workspace, testCaseId, runId) =>
     ipcRenderer.invoke("test-case:baseline-set", { workspace, testCaseId, runId }),
@@ -22,7 +23,7 @@ contextBridge.exposeInMainWorld("agentFirewall", {
   applyRevision: (workspace, revisionId) => ipcRenderer.invoke("revision:apply", { workspace, revisionId }),
   revertRevision: (workspace, revisionId) => ipcRenderer.invoke("revision:revert", { workspace, revisionId }),
   saveFlow: (workspace, flow) => ipcRenderer.invoke("flow:save", { workspace, flow }),
-  startFlow: (workspace, flow, operationId) => ipcRenderer.invoke("flow:start", { workspace, flow, operationId }),
+  startFlow: (workspace, flow, goal, operationId) => ipcRenderer.invoke("flow:start", { workspace, flow, goal, operationId }),
   resumeFlow: (workspace, runId, correction, operationId) =>
     ipcRenderer.invoke("flow:resume", { workspace, runId, correction, operationId })
 });

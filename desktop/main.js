@@ -3,6 +3,7 @@ const path = require("path");
 const {
   loadWorkspace,
   saveConfig,
+  testModelConnection,
   saveFlow,
   saveAndStartFlow,
   resumeFlow,
@@ -87,6 +88,8 @@ function registerIpc() {
     const workspace = path.resolve(payload.workspace);
     return saveConfig(workspace, payload.config);
   });
+  ipcMain.handle("model:test", async (_event, workspace) =>
+    testModelConnection(path.resolve(workspace)));
 
   ipcMain.handle("test-case:save", async (_event, payload) =>
     saveTestCase(path.resolve(payload.workspace), payload.testCase));
@@ -109,8 +112,14 @@ function registerIpc() {
     discoverMcpTools(path.resolve(payload.workspace), payload.agent, payload.server, payload.approved));
   ipcMain.handle("run:compare", async (_event, payload) =>
     compareRuns(path.resolve(payload.workspace), payload.baseline, payload.candidate));
-  ipcMain.handle("run:details", async (_event, payload) =>
-    getRunDetails(path.resolve(payload.workspace), payload.runId));
+  ipcMain.handle("run:details", async (_event, payload) => {
+    try {
+      return await getRunDetails(path.resolve(payload.workspace), payload.runId);
+    } catch (error) {
+      if (String(error.message || error).includes("run not found")) return null;
+      throw error;
+    }
+  });
   ipcMain.handle("revision:create", async (_event, payload) =>
     createRevision(path.resolve(payload.workspace), payload.revision));
   ipcMain.handle("revision:review", async (_event, payload) =>
@@ -122,7 +131,7 @@ function registerIpc() {
 
   ipcMain.handle("flow:start", async (_event, payload) => {
     const workspace = path.resolve(payload.workspace);
-    return saveAndStartFlow(workspace, payload.flow, payload.operationId);
+    return saveAndStartFlow(workspace, payload.flow, payload.goal, payload.operationId);
   });
 
   ipcMain.handle("flow:resume", async (_event, payload) => {

@@ -310,6 +310,7 @@
                 </div>
                 <div class="toolbar-buttons">
                   <button id="reloadConfig" type="button">重新加载</button>
+                  <button id="testModelConnection" type="button">测试连接</button>
                   <button id="saveConfig" class="primary-button" type="button">保存配置</button>
                 </div>
               </div>
@@ -317,9 +318,10 @@
               <div class="model-grid">
                 <section class="model-section">
                   <div class="model-list-head">
-                    <span>模型列表</span>
+                    <span>全局模型</span>
                     <strong id="modelCount">0</strong>
                   </div>
+                  <p class="model-list-help">选择一个模型作为所有智能体的运行模型。</p>
                   <div id="modelList" class="model-list"></div>
                   <div class="field-row split">
                     <button id="addModel" type="button">新增模型</button>
@@ -328,7 +330,7 @@
                 </section>
 
                 <section class="model-section">
-                  <h3>模型连接</h3>
+                  <h3>当前模型连接</h3>
                   <div class="field-row">
                     <label for="modelKeyInput">模型名字</label>
                     <input id="modelKeyInput" type="text" autocomplete="off" placeholder="work-gpt5" />
@@ -351,14 +353,13 @@
                   </div>
                   <div class="field-row">
                     <label for="modelApiKeyInput">API key</label>
-                    <input id="modelApiKeyInput" type="text" autocomplete="off" />
+                    <input id="modelApiKeyInput" type="password" autocomplete="off" />
                   </div>
                   <div class="field-row">
                     <label for="modelApiKeyEnvInput">API key env</label>
                     <input id="modelApiKeyEnvInput" type="text" autocomplete="off" placeholder="OPENAI_API_KEY" />
                   </div>
                   <div class="field-row inline">
-                    <label class="checkbox-label"><input id="modelEnabledInput" type="checkbox" />启用</label>
                     <label for="modelTemperatureInput">Temperature<input id="modelTemperatureInput" type="number" min="0" max="2" step="0.1" /></label>
                   </div>
                   <div class="field-row">
@@ -378,8 +379,8 @@
                     <input id="agentNameInput" type="text" autocomplete="off" />
                   </div>
                   <div class="field-row">
-                    <label for="agentModelSelect">使用模型名字</label>
-                    <select id="agentModelSelect"></select>
+                    <span class="field-label">运行模型</span>
+                    <div class="global-model-binding"><strong id="agentModelGlobalName">-</strong><span>由全局模型统一控制</span></div>
                   </div>
                   <div class="field-row">
                     <label for="systemPromptInput">系统提示词</label>
@@ -429,31 +430,22 @@
             <header class="view-header">
               <div>
                 <span class="eyebrow">高级模式</span>
-                <h2 id="advancedTitle">编排画布</h2>
+                <h2 id="advancedTitle">高级编排</h2>
               </div>
-              <span class="view-note">用于多能力执行路径；测试闭环仍在“测试与修复”中完成</span>
+              <span class="view-note">每个节点描述一个目标，Agent 自主选择 Skills 执行</span>
             </header>
             <section id="flowView" class="workspace-grid">
               <aside class="inventory">
                 <div class="panel-heading">
-                  <div><span>资源库</span><strong>拖入画布</strong></div>
-                  <strong id="inventoryCount">0</strong>
+                  <div><span>目标节点</span><strong>每个节点由 Agent 执行</strong></div>
+                  <button id="newGoalNode" class="small-button" type="button">新建目标</button>
                 </div>
-                <div class="tabs" role="tablist">
-                  <button class="tab" data-tab="agents" type="button">智能体</button>
-                  <button class="tab active" data-tab="models" type="button">模型</button>
-                  <button class="tab" data-tab="skills" type="button">技能</button>
-                  <button class="tab" data-tab="mcp" type="button">MCP</button>
-                </div>
-                <div class="inventory-search">
-                  <input id="inventorySearch" type="search" placeholder="搜索资源..." />
-                </div>
-                <div id="inventoryList" class="inventory-list"></div>
+                <div class="inventory-list"><div class="empty-inline">在画布中选择节点，填写自然语言目标。Agent 会按目标自主使用已挂载的 Skills。</div></div>
               </aside>
 
               <section class="canvas-wrap">
                 <div class="canvas-toolbar">
-                  <div><span class="eyebrow">当前流程</span><strong id="flowStats">0 个节点</strong></div>
+                  <div><span class="eyebrow">目标链</span><strong id="flowStats">0 个节点</strong></div>
                   <div class="toolbar-buttons">
                     <button id="zoomOut" class="icon-button" type="button" title="缩小" aria-label="缩小">−</button>
                     <button id="zoomReset" class="icon-button" type="button" title="重置缩放" aria-label="重置缩放">1:1</button>
@@ -462,9 +454,14 @@
                     <button id="clearFlow" class="icon-button danger-button" type="button" title="重置画布">重置</button>
                   </div>
                 </div>
+                <section id="flowDebugPanel" class="flow-debug-panel" aria-live="polite">
+                  <div><span>调试反馈</span><strong id="flowDebugStatus">尚未调试</strong></div>
+                  <p id="flowDebugMessage">点击“调试流程”检查节点、连线和可执行资源。</p>
+                </section>
                 <div id="flowCanvas" class="flow-canvas" aria-label="智能体编排画布"></div>
                 <div class="canvas-actionbar" aria-label="编排操作">
                   <button id="saveFlow" type="button">保存编排</button>
+                  <button id="debugFlow" type="button">调试流程</button>
                   <button id="startFlow" class="primary-button" type="button">▶ 保存并运行</button>
                   <button id="cancelFlow" class="danger-button" type="button" title="终止本地后端进程并写入取消终态" disabled>取消运行</button>
                 </div>
@@ -472,7 +469,7 @@
 
               <aside class="details">
                 <div class="panel-heading">
-                  <div><span>节点详情</span><strong>参数与策略</strong></div>
+                  <div><span>节点详情</span><strong>执行目标</strong></div>
                   <strong id="selectedType">未选择</strong>
                 </div>
                 <div id="detailsBody" class="details-body"></div>
@@ -481,8 +478,14 @@
                     <span>运行</span>
                     <strong id="runStatus">空闲</strong>
                   </div>
+                  <div class="flow-run-fields">
+                    <div class="field-row">
+                      <label for="flowCorrectionInput">目标纠正</label>
+                      <textarea id="flowCorrectionInput" rows="3" placeholder="流程暂停或失败后，说明要如何调整目标或处理结果" disabled></textarea>
+                    </div>
+                  </div>
                   <pre id="runOutput">就绪。</pre>
-                  <button id="resumeFlow" type="button" disabled>提交修正并恢复</button>
+                  <button id="resumeFlow" type="button" disabled>提交纠正并恢复</button>
                 </div>
                 <div class="config-summary">
                   <span>ACP</span>

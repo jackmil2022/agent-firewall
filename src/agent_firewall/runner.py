@@ -53,6 +53,17 @@ def run_flow(
     run_id: str | None = None,
 ) -> dict[str, Any]:
     flow = load_flow(config.workspace, config, name=flow_name, path=flow_path)
+    return _start_flow_run(config, flow, goal=goal, flow_name=flow_name, run_id=run_id)
+
+
+def _start_flow_run(
+    config: AgentFirewallConfig,
+    flow: FlowSpec,
+    *,
+    goal: str,
+    flow_name: str,
+    run_id: str | None,
+) -> dict[str, Any]:
     validate_flow(flow, config, check_resources=True)
     store = AgentFirewallStore(config.workspace)
     run_id = run_id or uuid4().hex
@@ -866,6 +877,9 @@ def _approved_operation(packet: TaskPacket) -> str:
 
 def _agent_prompt(node: FlowNode, packet: TaskPacket) -> str:
     prompt = packet.prompt()
+    node_goal = str(node.params.get("goal") or "").strip()
+    if node_goal:
+        return f"Node objective:\n{node_goal}\n\n{prompt}"
     if not node.params:
         return prompt
     capability_input = json.dumps(_jsonable(node.params), ensure_ascii=False)

@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from agent_firewall.config import ConfigError, load_config, write_default_config
-from agent_firewall.engine import _resolve_model
+from agent_firewall.engine import _resolve_model, probe_model_connection
 from agent_firewall.store import AgentFirewallStore
 
 
@@ -45,6 +45,7 @@ def test_resolve_model_builds_configured_chat_model(tmp_path: Path, monkeypatch:
         "api_key": "secret",
         "temperature": 0.1,
         "max_tokens": 321,
+        "use_responses_api": False,
     }
 
 
@@ -130,3 +131,18 @@ def test_resolve_model_prefers_plaintext_api_key_over_environment(
     _resolve_model("work", config)
 
     assert captured["api_key"] == "stored-secret"
+
+
+def test_model_connection_invokes_the_global_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config = _model_config(tmp_path, provider="fake", base_url="")
+    captured = {}
+
+    class FakeModel:
+        def invoke(self, prompt):
+            captured["prompt"] = prompt
+            return type("Response", (), {"content": "OK"})()
+
+    monkeypatch.setattr("agent_firewall.engine._resolve_model", lambda model, current: FakeModel())
+
+    assert probe_model_connection(config) == {"ok": True, "model": "work", "response": "OK"}
+    assert captured["prompt"] == "Reply with exactly: OK"

@@ -11,7 +11,7 @@ from .acp import serve_acp
 from .browser import browser_smoke
 from .capabilities import discover_mcp_tools, list_capabilities
 from .config import APP_DIR, AgentFirewallConfig, ConfigError, load_config, load_config_mapping, normalize_config_mapping, write_default_config
-from .engine import EngineError, build_agent_sync
+from .engine import EngineError, build_agent_sync, probe_model_connection
 from .flow import FlowError, load_flow, preflight_flow, save_flow
 from .runner import RunnerError, resume_flow, run_flow
 from .revisions import apply_revision, create_revision, review_revision, revert_revision
@@ -63,6 +63,7 @@ def main(argv: list[str] | None = None) -> int:
 
     config_save_parser = subparsers.add_parser("config-save", help="Save config JSON to sqlite.")
     config_save_parser.add_argument("--file", help="Read config JSON from file. Defaults to stdin.")
+    subparsers.add_parser("model-test", help="Send a minimal request to the global model.")
 
     test_case_save_parser = subparsers.add_parser("test-case-save", help="Save a workbench test case.")
     test_case_save_parser.add_argument("--file", help="Read test case JSON from file. Defaults to stdin.")
@@ -173,6 +174,9 @@ def main(argv: list[str] | None = None) -> int:
             AgentFirewallConfig.from_mapping(data, workspace)
             AgentFirewallStore(workspace).save_config(data)
             print(json.dumps({"ok": True, "database": str(AgentFirewallStore(workspace).path)}, ensure_ascii=False))
+            return 0
+        if args.command == "model-test":
+            print(json.dumps(probe_model_connection(load_config(workspace=workspace)), ensure_ascii=False))
             return 0
         if args.command == "test-case-save":
             value = _read_json_payload(args.file)

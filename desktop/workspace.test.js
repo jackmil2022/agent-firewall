@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const path = require("node:path");
 const test = require("node:test");
 
-const { pythonCommand } = require("./workspace");
+const { backendArgs, flowRunArgs, pythonCommand } = require("./workspace");
 
 test("development backend uses the project virtualenv, not the selected workspace", () => {
   const originalPython = process.env.PYTHON;
@@ -22,4 +22,15 @@ test("development backend uses the project virtualenv, not the selected workspac
     if (originalResourcesPath === undefined) delete process.resourcesPath;
     else process.resourcesPath = originalResourcesPath;
   }
+});
+
+test("flow launch forwards the operator goal and run id", () => {
+  assert.deepEqual(
+    flowRunArgs("inspect the selected workspace", "run-123"),
+    ["-m", "agent_firewall", "run", "--goal", "inspect the selected workspace", "--run-id", "run-123"]
+  );
+});
+
+test("packaged backend receives the model test command without Python module flags", () => {
+  assert.deepEqual(backendArgs("agent-firewall", ["-m", "agent_firewall", "model-test"]), ["model-test"]);
 });

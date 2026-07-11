@@ -32,18 +32,21 @@ const els = {
   flowView: document.querySelector("#flowView"),
   modelView: document.querySelector("#modelView"),
   workspacePath: document.querySelector("#workspacePath"),
-  inventoryCount: document.querySelector("#inventoryCount"),
-  inventorySearch: document.querySelector("#inventorySearch"),
-  inventoryList: document.querySelector("#inventoryList"),
+  newGoalNode: document.querySelector("#newGoalNode"),
   flowCanvas: document.querySelector("#flowCanvas"),
   flowStats: document.querySelector("#flowStats"),
+  flowDebugPanel: document.querySelector("#flowDebugPanel"),
+  flowDebugStatus: document.querySelector("#flowDebugStatus"),
+  flowDebugMessage: document.querySelector("#flowDebugMessage"),
   selectedType: document.querySelector("#selectedType"),
   detailsBody: document.querySelector("#detailsBody"),
   acpSummary: document.querySelector("#acpSummary"),
   chooseWorkspace: document.querySelector("#chooseWorkspace"),
   startFlow: document.querySelector("#startFlow"),
   saveFlow: document.querySelector("#saveFlow"),
+  debugFlow: document.querySelector("#debugFlow"),
   saveConfig: document.querySelector("#saveConfig"),
+  testModelConnection: document.querySelector("#testModelConnection"),
   reloadConfig: document.querySelector("#reloadConfig"),
   clearFlow: document.querySelector("#clearFlow"),
   linkMode: document.querySelector("#linkMode"),
@@ -52,9 +55,10 @@ const els = {
   zoomIn: document.querySelector("#zoomIn"),
   runStatus: document.querySelector("#runStatus"),
   runOutput: document.querySelector("#runOutput"),
+  flowCorrectionInput: document.querySelector("#flowCorrectionInput"),
   resumeFlow: document.querySelector("#resumeFlow"),
   activeAgentSelect: document.querySelector("#activeAgentSelect"),
-  agentModelSelect: document.querySelector("#agentModelSelect"),
+  agentModelGlobalName: document.querySelector("#agentModelGlobalName"),
   agentNameInput: document.querySelector("#agentNameInput"),
   modelCount: document.querySelector("#modelCount"),
   modelList: document.querySelector("#modelList"),
@@ -67,7 +71,6 @@ const els = {
   modelBaseUrlInput: document.querySelector("#modelBaseUrlInput"),
   modelApiKeyInput: document.querySelector("#modelApiKeyInput"),
   modelApiKeyEnvInput: document.querySelector("#modelApiKeyEnvInput"),
-  modelEnabledInput: document.querySelector("#modelEnabledInput"),
   modelTemperatureInput: document.querySelector("#modelTemperatureInput"),
   modelMaxTokensInput: document.querySelector("#modelMaxTokensInput"),
   systemPromptInput: document.querySelector("#systemPromptInput"),
@@ -189,8 +192,10 @@ function wireEvents() {
   els.saveFlow.addEventListener("click", async () => {
     await saveFlow("manual");
   });
+  els.debugFlow.addEventListener("click", () => executeFlowRun(true));
 
-  els.inventorySearch.addEventListener("input", () => {
+  els.newGoalNode.addEventListener("click", () => addGoalNode());
+  els.inventorySearch?.addEventListener("input", () => {
     state.inventoryQuery = els.inventorySearch.value.trim().toLowerCase();
     renderInventory();
   });
@@ -202,6 +207,19 @@ function wireEvents() {
 
   els.saveConfig.addEventListener("click", async () => {
     await saveModelConfig();
+  });
+  els.testModelConnection.addEventListener("click", async () => {
+    if (!await saveModelConfig()) return;
+    els.testModelConnection.disabled = true;
+    els.modelStatus.textContent = "正在测试模型连接...";
+    try {
+      const result = await window.agentFirewall.testModelConnection(state.workspace);
+      els.modelStatus.textContent = `连接成功：${result.model}${result.response ? `\n模型响应：${result.response}` : ""}`;
+    } catch (error) {
+      els.modelStatus.textContent = `连接失败：${error.message}`;
+    } finally {
+      els.testModelConnection.disabled = false;
+    }
   });
 
   els.activeAgentSelect.addEventListener("change", () => renderModelForm());
@@ -248,37 +266,47 @@ function wireEvents() {
   els.revertRevision?.addEventListener("click", () => revertSelectedRevision());
   els.cancelFlow?.addEventListener("click", () => cancelActiveFlowRun());
 
-  els.startFlow.addEventListener("click", async () => {
+  els.startFlow.addEventListener("click", () => executeFlowRun(false));
+
+  async function executeFlowRun(debug) {
     if (!state.workspace || !state.data) return;
+    const flow = await preflightCurrentFlow(true);
+    if (!flow) return;
     const operationId = crypto.randomUUID();
     state.activeFlowOperationId = operationId;
     startFlowRunPolling(operationId);
     els.startFlow.disabled = true;
+    els.debugFlow.disabled = true;
     els.cancelFlow.disabled = false;
-    els.runStatus.textContent = "运行中";
+    els.flowCorrectionInput.value = "";
+    els.runStatus.textContent = debug ? "调试运行中" : "运行中";
     els.runOutput.textContent = "本地后端进程运行中，正在从 SQLite 增量载入事件。";
+    setFlowDebug(debug ? "调试运行中" : "运行中", "正在从开始节点执行到结束节点，详细事件会同步到右侧运行日志。", "running");
     try {
-      const result = await window.agentFirewall.startFlow(state.workspace, currentFlow(), operationId);
+      const result = await window.agentFirewall.startFlow(state.workspace, flow, "Execute the configured goal chain.", operationId);
       state.lastRun = result.run;
       els.runStatus.textContent = translateStatus(result.status);
       els.runOutput.textContent = formatRunResult(result);
-      els.resumeFlow.disabled = !["needs_input", "blocked", "failed"].includes(result.status);
+      updateFlowResumeControls(result.status);
+      setFlowDebug(translateStatus(result.status), flowRunReason(result.run) || result.stderr || "流程已结束。", statusClass(result.status));
       els.workspacePath.textContent = `${state.workspace} / 编排已保存`;
     } catch (error) {
       els.runStatus.textContent = "错误";
       els.runOutput.textContent = error.message;
+      updateFlowResumeControls("error");
+      setFlowDebug("运行错误", error.message, "error");
     } finally {
       stopFlowRunPolling();
       if (state.activeFlowOperationId === operationId) state.activeFlowOperationId = null;
       els.startFlow.disabled = false;
+      els.debugFlow.disabled = false;
       els.cancelFlow.disabled = true;
     }
-  });
+  }
 
   els.resumeFlow.addEventListener("click", async () => {
     if (!state.workspace || !state.lastRun?.run_id) return;
-    const correction = window.prompt("输入修正内容或审批 decisions JSON。", "");
-    if (correction === null) return;
+    const correction = els.flowCorrectionInput.value.trim();
     const operationId = state.lastRun.run_id;
     state.activeFlowOperationId = operationId;
     startFlowRunPolling(operationId);
@@ -295,7 +323,7 @@ function wireEvents() {
       state.lastRun = result.run;
       els.runStatus.textContent = translateStatus(result.status);
       els.runOutput.textContent = formatRunResult(result);
-      els.resumeFlow.disabled = !["needs_input", "blocked", "failed"].includes(result.status);
+      updateFlowResumeControls(result.status);
     } catch (error) {
       els.runStatus.textContent = "错误";
       els.runOutput.textContent = error.message;
@@ -363,7 +391,6 @@ function setActiveView(view, activeButton = null) {
     element?.classList.toggle("hidden", key !== view);
     element?.classList.toggle("active-view", key === view);
   });
-  if (view === "advanced") setTimeout(() => fitEditorView(), 0);
   const target = activeButton || document.querySelector(`.view-toggle[data-view="${view}"]`);
   document.querySelectorAll(".view-toggle").forEach((button) => {
     button.classList.toggle("active", button === target);
@@ -510,6 +537,7 @@ async function loadWorkspace() {
 function setWorkspaceData(data) {
   state.workspace = data.workspace;
   state.data = data;
+  normalizeGoalNodes(data.flow, data.activeAgent);
   state.selectedNodeId = data.flow.nodes[0] ? data.flow.nodes[0].id : null;
   els.workspacePath.textContent = data.workspace;
   els.acpSummary.textContent = data.acp.enabled ? "已启用 / stdio" : "已禁用";
@@ -570,6 +598,7 @@ function inventoryItems() {
 }
 
 function renderInventory() {
+  if (!els.inventoryCount || !els.inventoryList) return;
   const items = filterInventoryItems(inventoryItems());
   els.inventoryCount.textContent = String(items.length);
   els.inventoryList.innerHTML = "";
@@ -605,6 +634,42 @@ function filterInventoryItems(items) {
       .filter(Boolean)
       .some((value) => String(value).toLowerCase().includes(state.inventoryQuery))
   );
+}
+
+function normalizeGoalNodes(flow, activeAgent) {
+  const agent = state.data?.agents?.find((item) => item.key === activeAgent) || state.data?.agents?.[0];
+  flow.nodes = flow.nodes.map((node) => {
+    if (node.type === "start" || node.type === "end") return node;
+    const goal = String(node.params?.goal || "").trim();
+    return {
+      ...node,
+      type: "agent",
+      ref: agent?.key || activeAgent || "default",
+      params: { goal },
+      meta: { key: agent?.key || activeAgent || "default", model: agent?.model || "" }
+    };
+  });
+}
+
+function addGoalNode() {
+  if (!state.data || !state.editor) return;
+  const agent = state.data.agents?.find((item) => item.key === state.data.activeAgent) || state.data.agents?.[0];
+  const existing = state.data.flow.nodes.filter((node) => node.id.startsWith("agent:goal-")).length;
+  const id = `agent:goal-${existing + 1}`;
+  const position = findFreeNodePosition(360, 160 + existing * 40);
+  addEditorNode({
+    id,
+    type: "agent",
+    label: "新目标",
+    ref: agent?.key || state.data.activeAgent || "default",
+    x: position.x,
+    y: position.y,
+    params: { goal: "" },
+    meta: { key: agent?.key || state.data.activeAgent || "default", model: agent?.model || "" }
+  });
+  syncFlowFromEditor(true);
+  state.selectedNodeId = id;
+  renderDetails();
 }
 
 function addAssetNode(asset, x, y) {
@@ -794,9 +859,9 @@ function nodeHtml(node) {
   }
   return `
     <div class="flow-node-card">
-      <span class="pill ${node.type}">${translateType(node.type)}</span>
+      <span class="pill agent">目标</span>
       <h3>${escapeHtml(node.label)}</h3>
-      <code>${escapeHtml(node.meta?.model || node.meta?.path || node.meta?.agent || node.id)}</code>
+      <code>${escapeHtml(node.params?.goal || "等待填写目标")}</code>
     </div>
   `;
 }
@@ -810,55 +875,24 @@ function renderDetails() {
     return;
   }
   els.selectedType.textContent = translateType(node.type);
-  const outgoing = state.data.flow.edges.filter((edge) => edge.from === node.id);
+  if (node.type === "start" || node.type === "end") {
+    els.selectedType.textContent = translateType(node.type);
+    els.detailsBody.innerHTML = "<p>边界节点由系统管理。</p>";
+    return;
+  }
   els.detailsBody.innerHTML = `
-    <h2>${escapeHtml(node.label)}</h2>
-    <p>${escapeHtml(node.id)}</p>
-    <div class="kv">
-      <div><span>位置</span><code>${Math.round(node.x)}, ${Math.round(node.y)}</code></div>
-      <div><span>出站连线</span><code>${state.data.flow.edges.filter((edge) => edge.from === node.id).length}</code></div>
-      <div><span>入站连线</span><code>${state.data.flow.edges.filter((edge) => edge.to === node.id).length}</code></div>
-    </div>
     ${nodePolicyHtml(node)}
-    ${outgoingEdgesHtml(outgoing)}
-    <pre>${escapeHtml(JSON.stringify(node.meta || {}, null, 2))}</pre>
   `;
   wireNodePolicy(node);
-  wireOutgoingEdges(outgoing);
 }
 
 function nodePolicyHtml(node) {
-  if (node.type === "start" || node.type === "end") return "";
-  const params = node.params || {};
-  const retry = params.retry || {};
-  const validation = JSON.stringify(params.validate || {}, null, 2);
-  const typeFields = [];
-  if (node.type === "skill") {
-    typeFields.push(`
-      <label>脚本<input id="nodeScript" type="text" value="${escapeHtml(params.script || "")}" /></label>
-    `);
-  }
-  if (node.type === "mcp") {
-    typeFields.push(`
-      <label>工具<input id="nodeTool" type="text" value="${escapeHtml(params.tool || "")}" /></label>
-      <label>参数 JSON<textarea id="nodeArgs" rows="5">${escapeHtml(JSON.stringify(params.args || {}, null, 2))}</textarea></label>
-      <label>幂等参数<input id="nodeIdempotencyArg" type="text" value="${escapeHtml(params.idempotency_arg || "")}" /></label>
-    `);
-  }
-  if (node.type === "agent") {
-    typeFields.push(`
-      <label class="detail-check"><input id="nodeRequiresApproval" type="checkbox" ${params.requires_approval ? "checked" : ""} />运行前审批</label>
-    `);
-  }
   return `
-    <div class="node-policy">
-      <label>超时秒数<input id="nodeTimeout" type="number" min="1" value="${Number(params.timeout_seconds) || 60}" /></label>
-      <label>最大尝试<input id="nodeAttempts" type="number" min="1" value="${Number(retry.max_attempts) || 1}" /></label>
-      <label>重试间隔<input id="nodeRetryDelay" type="number" min="0" step="0.1" value="${Number(retry.delay_seconds) || 0}" /></label>
-      <label class="detail-check"><input id="nodeIdempotent" type="checkbox" ${params.idempotent ? "checked" : ""} />节点可幂等重试</label>
-      ${typeFields.join("")}
-      <label>结果校验 JSON<textarea id="nodeValidation" rows="6">${escapeHtml(validation)}</textarea></label>
-      <button id="applyNodePolicy" type="button">应用节点策略</button>
+    <div class="node-policy goal-node-editor">
+      <h2>${escapeHtml(node.label || "目标节点")}</h2>
+      <label for="nodeGoal">执行目标</label>
+      <textarea id="nodeGoal" rows="9" placeholder="用自然语言描述这个节点需要完成什么">${escapeHtml(node.params?.goal || "")}</textarea>
+      <button id="applyNodePolicy" class="primary-button" type="button">保存目标</button>
     </div>
   `;
 }
@@ -886,36 +920,11 @@ function wireNodePolicy(node) {
   const button = document.querySelector("#applyNodePolicy");
   if (!button) return;
   button.addEventListener("click", () => {
-    let validation;
-    let args;
-    try {
-      validation = JSON.parse(document.querySelector("#nodeValidation")?.value || "{}");
-      args = JSON.parse(document.querySelector("#nodeArgs")?.value || "{}");
-    } catch (error) {
-      els.runStatus.textContent = "配置错误";
-      els.runOutput.textContent = error.message;
-      return;
-    }
-    node.params = {
-      ...(node.params || {}),
-      timeout_seconds: Number(document.querySelector("#nodeTimeout")?.value) || 60,
-      retry: {
-        max_attempts: Number(document.querySelector("#nodeAttempts")?.value) || 1,
-        delay_seconds: Number(document.querySelector("#nodeRetryDelay")?.value) || 0
-      },
-      idempotent: Boolean(document.querySelector("#nodeIdempotent")?.checked),
-      validate: validation
-    };
-    if (node.type === "skill") node.params.script = document.querySelector("#nodeScript")?.value.trim() || "";
-    if (node.type === "mcp") {
-      node.params.tool = document.querySelector("#nodeTool")?.value.trim() || "";
-      node.params.args = args;
-      node.params.idempotency_arg = document.querySelector("#nodeIdempotencyArg")?.value.trim() || "";
-    }
-    if (node.type === "agent") {
-      node.params.requires_approval = Boolean(document.querySelector("#nodeRequiresApproval")?.checked);
-    }
+    const goal = document.querySelector("#nodeGoal")?.value.trim() || "";
+    node.params = { goal };
+    node.label = goal ? goal.slice(0, 28) : "新目标";
     updateEditorNodeData(node);
+    renderCanvas();
     scheduleAutosave();
     renderDetails();
   });
@@ -954,19 +963,91 @@ function currentFlow() {
 
 async function saveFlow(reason) {
   if (!state.workspace || !state.data) return null;
-  const result = await window.agentFirewall.saveFlow(state.workspace, currentFlow());
+  const flow = await preflightCurrentFlow(reason !== "automatically");
+  if (!flow) return null;
+  const result = await window.agentFirewall.saveFlow(state.workspace, flow);
   els.workspacePath.textContent = `${state.workspace} / ${reason === "manual" ? "手动保存" : "已自动保存"}`;
   return result;
+}
+
+async function preflightCurrentFlow(focusIssue = false) {
+  const flow = currentFlow();
+  const missingGoal = flow.nodes.find((node) => node.type === "agent" && !String(node.params?.goal || "").trim());
+  if (missingGoal) {
+    showFlowError("请填写这个节点要完成的自然语言目标。", focusIssue, missingGoal.id);
+    return null;
+  }
+  const result = await window.agentFirewall.preflightFlow(state.workspace, flow);
+  if (result.valid) {
+    clearFlowIssue();
+    return flow;
+  }
+  const issue = result.issues?.[0];
+  showFlowError(preflightMessage(issue), focusIssue, issue?.node_id);
+  return null;
+}
+
+function preflightMessage(issue) {
+  if (issue?.code === "skill_script_required") {
+    return "Skill 仅提供资源绑定。请在右侧“可执行脚本”中选择一个 Script Action，再应用节点策略。";
+  }
+  return issue?.message || "流程配置无效。";
+}
+
+function showFlowError(message, focusIssue = false, nodeId = "") {
+  const node = state.data?.flow.nodes.find((item) => item.id === nodeId);
+  const detail = node ? `节点“${node.label}”：${message}` : message;
+  els.runStatus.textContent = "配置错误";
+  els.runOutput.textContent = `流程尚未保存或运行。\n\n${detail}`;
+  els.runOutput.scrollTop = 0;
+  setFlowDebug("配置错误", detail, "error");
+  updateFlowResumeControls("error");
+  markFlowIssue(nodeId);
+  if (focusIssue && nodeId && state.data?.flow.nodes.some((node) => node.id === nodeId)) {
+    state.selectedNodeId = nodeId;
+    selectEditorNode(nodeId);
+    renderDetails();
+  }
+}
+
+function setFlowDebug(status, message, tone = "neutral") {
+  els.flowDebugStatus.textContent = status;
+  els.flowDebugMessage.textContent = message;
+  els.flowDebugPanel.className = `flow-debug-panel ${tone}`;
+}
+
+function markFlowIssue(nodeId) {
+  els.flowCanvas.querySelectorAll(".flow-invalid").forEach((node) => node.classList.remove("flow-invalid"));
+  if (!nodeId || !state.editor) return;
+  const drawflowId = Object.values(state.editor.drawflow.drawflow.Home.data)
+    .find((node) => node.data?.flowId === nodeId)?.id;
+  els.flowCanvas.querySelector(`#node-${cssEscape(String(drawflowId || ""))}`)?.classList.add("flow-invalid");
+}
+
+function clearFlowIssue() {
+  els.flowCanvas.querySelectorAll(".flow-invalid").forEach((node) => node.classList.remove("flow-invalid"));
+}
+
+function updateFlowResumeControls(status) {
+  const resumable = ["needs_input", "blocked", "failed"].includes(status);
+  els.resumeFlow.disabled = !resumable;
+  els.flowCorrectionInput.disabled = !resumable;
+  if (resumable) {
+    els.flowCorrectionInput.placeholder = status === "needs_input"
+      ? "输入审批决定或 Agent 要求的 JSON 决策"
+      : "说明要如何调整目标、输入或处理方式";
+    els.resumeFlow.textContent = status === "needs_input" ? "提交输入并恢复" : "提交纠正并重试";
+  } else {
+    els.resumeFlow.textContent = "提交纠正并恢复";
+  }
 }
 
 function renderModelForm() {
   if (!state.data?.config) return;
   const config = state.data.config;
-  ensureModels(config);
+  const globalModelKey = ensureModels(config);
   const modelKeys = Object.keys(config.models || {});
-  if (!modelKeys.includes(state.selectedModelKey)) {
-    state.selectedModelKey = modelKeys[0] || "";
-  }
+  state.selectedModelKey = globalModelKey || modelKeys[0] || "";
   renderModelList(config);
   const model = config.models?.[state.selectedModelKey] || {};
   const params = model.params || {};
@@ -977,7 +1058,6 @@ function renderModelForm() {
   els.modelBaseUrlInput.value = model.base_url || "";
   els.modelApiKeyInput.value = model.api_key || "";
   els.modelApiKeyEnvInput.value = model.api_key_env || "";
-  els.modelEnabledInput.checked = Boolean(model.enabled ?? true);
   els.modelTemperatureInput.value = params.temperature ?? "";
   els.modelMaxTokensInput.value = params.max_tokens ?? "";
 
@@ -990,10 +1070,7 @@ function renderModelForm() {
 
   const agent = config.agents?.[els.activeAgentSelect.value] || {};
   els.agentNameInput.value = agent.name || "";
-  els.agentModelSelect.innerHTML = modelKeys
-    .map((key) => `<option value="${escapeHtml(key)}">${escapeHtml(key)}</option>`)
-    .join("");
-  els.agentModelSelect.value = modelKeys.includes(agent.model) ? agent.model : modelKeys[0] || "";
+  els.agentModelGlobalName.textContent = state.selectedModelKey || "-";
   els.systemPromptInput.value = agent.system_prompt || "";
   els.agentCheckpointInput.checked = Boolean(agent.checkpoint ?? true);
   els.agentInterruptInput.value = JSON.stringify(agent.interrupt_on || {}, null, 2);
@@ -1013,29 +1090,36 @@ function renderModelList(config) {
   els.modelList.innerHTML = "";
   keys.forEach((key) => {
     const model = config.models[key] || {};
-    const usedBy = agentsUsingModel(config, key);
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = `model-list-item${key === state.selectedModelKey ? " active" : ""}`;
-    button.innerHTML = `
-      <strong>${escapeHtml(model.display_name || key)}</strong>
-      <span>${escapeHtml(key)}</span>
-      <span>${escapeHtml(model.provider || "-")} / ${escapeHtml(model.model || "-")}</span>
+    const item = document.createElement("label");
+    item.className = `model-list-item${key === state.selectedModelKey ? " active" : ""}`;
+    item.innerHTML = `
+      <input type="radio" name="globalModel" value="${escapeHtml(key)}" ${key === state.selectedModelKey ? "checked" : ""} />
+      <span class="model-list-copy"><strong>${escapeHtml(model.display_name || key)}</strong><span>${escapeHtml(key)}</span><span>${escapeHtml(model.provider || "-")} / ${escapeHtml(model.model || "-")}</span></span>
       <div class="model-list-meta">
-        <span class="model-badge ${model.enabled === false ? "" : "enabled"}">${model.enabled === false ? "禁用" : "启用"}</span>
-        <span class="model-badge">${escapeHtml(usedBy.length ? usedBy.join(", ") : "未绑定")}</span>
+        <span class="model-badge enabled">当前启用</span>
+        <span class="model-badge">全局</span>
       </div>
     `;
-    button.addEventListener("click", () => {
-      state.selectedModelKey = key;
+    item.querySelector("input").addEventListener("change", () => {
+      selectGlobalModel(config, key);
       renderModelForm();
     });
-    els.modelList.appendChild(button);
+    els.modelList.appendChild(item);
   });
 }
 
+function selectGlobalModel(config, key) {
+  Object.entries(config.models || {}).forEach(([modelKey, model]) => {
+    model.enabled = modelKey === key;
+  });
+  Object.values(config.agents || {}).forEach((agent) => {
+    agent.model = key;
+  });
+  state.selectedModelKey = key;
+}
+
 async function saveModelConfig() {
-  if (!state.workspace || !state.data?.config) return;
+  if (!state.workspace || !state.data?.config) return false;
   const config = structuredClone(state.data.config);
   ensureModels(config);
   const agentKey = els.activeAgentSelect.value;
@@ -1045,19 +1129,19 @@ async function saveModelConfig() {
   const newModelKey = els.modelKeyInput.value.trim();
   if (!newModelKey) {
     els.modelStatus.textContent = "模型名字不能为空。";
-    return;
+    return false;
   }
   if (oldModelKey !== newModelKey && config.models[newModelKey]) {
     els.modelStatus.textContent = "模型名字已存在。";
-    return;
+    return false;
   }
   if (!els.modelProviderInput.value.trim()) {
     els.modelStatus.textContent = "Provider 不能为空。";
-    return;
+    return false;
   }
   if (!els.modelValueInput.value.trim()) {
     els.modelStatus.textContent = "模型 ID 不能为空。";
-    return;
+    return false;
   }
 
   let mcpServers;
@@ -1073,7 +1157,7 @@ async function saveModelConfig() {
       : null;
   } catch (error) {
     els.modelStatus.textContent = `JSON 无效: ${error.message}`;
-    return;
+    return false;
   }
 
   if (oldModelKey && oldModelKey !== newModelKey) {
@@ -1091,16 +1175,15 @@ async function saveModelConfig() {
     base_url: els.modelBaseUrlInput.value.trim(),
     api_key: els.modelApiKeyInput.value,
     api_key_env: els.modelApiKeyEnvInput.value.trim(),
-    enabled: els.modelEnabledInput.checked,
+    enabled: true,
     params: compactModelParams()
   };
 
   config.active_agent = agentKey;
-  const selectedAgentModel = els.agentModelSelect.value === oldModelKey ? newModelKey : els.agentModelSelect.value;
   config.agents[agentKey] = {
     ...config.agents[agentKey],
     name: els.agentNameInput.value.trim() || agentKey,
-    model: selectedAgentModel || newModelKey,
+    model: newModelKey,
     system_prompt: els.systemPromptInput.value,
     mcp_servers: mcpServers,
     allowed_mcp_tools: allowedMcpTools,
@@ -1108,6 +1191,7 @@ async function saveModelConfig() {
     response_format: responseFormat,
     checkpoint: els.agentCheckpointInput.checked
   };
+  selectGlobalModel(config, newModelKey);
   config.acp = {
     ...(config.acp || {}),
     enabled: els.acpEnabledInput.checked,
@@ -1124,8 +1208,10 @@ async function saveModelConfig() {
     setWorkspaceData(reloaded);
     setActiveView("settings");
     els.modelStatus.textContent = `已保存到 ${result.database}`;
+    return true;
   } catch (error) {
     els.modelStatus.textContent = error.message;
+    return false;
   } finally {
     els.saveConfig.disabled = false;
   }
@@ -1148,12 +1234,13 @@ function ensureModels(config) {
       };
     }
   });
-}
-
-function agentsUsingModel(config, modelKey) {
-  return Object.entries(config.agents || {})
-    .filter(([, agent]) => agent.model === modelKey)
-    .map(([key]) => key);
+  const keys = Object.keys(config.models);
+  const activeAgent = config.agents?.[config.active_agent];
+  const selected = keys.find((key) => config.models[key].enabled !== false && key === activeAgent?.model)
+    || keys.find((key) => config.models[key].enabled !== false)
+    || keys[0];
+  if (selected) selectGlobalModel(config, selected);
+  return selected;
 }
 
 function compactModelParams() {
@@ -1182,10 +1269,10 @@ function addModelConfig() {
     base_url: "",
     api_key: "",
     api_key_env: "OPENAI_API_KEY",
-    enabled: true,
+    enabled: false,
     params: { temperature: 0.2, max_tokens: 4096 }
   };
-  state.selectedModelKey = key;
+  selectGlobalModel(config, key);
   renderModelForm();
 }
 
@@ -1199,14 +1286,14 @@ function deleteModelConfig() {
     els.modelStatus.textContent = "至少保留一个模型配置。";
     return;
   }
-  const usedBy = agentsUsingModel(config, key);
-  if (usedBy.length) {
-    els.modelStatus.textContent = `模型正在被使用，先切换这些智能体: ${usedBy.join(", ")}`;
+  const fallback = modelKeys.find((modelKey) => modelKey !== key);
+  if (!fallback || !window.confirm(`删除“${config.models[key].display_name || key}”后，将切换到“${config.models[fallback].display_name || fallback}”。`)) {
     return;
   }
   delete config.models[key];
-  state.selectedModelKey = Object.keys(config.models)[0] || "";
+  selectGlobalModel(config, fallback);
   renderModelForm();
+  els.modelStatus.textContent = "模型已删除，当前模型已切换。请保存配置。";
 }
 
 let autosaveTimer = null;
@@ -1787,12 +1874,19 @@ function startFlowRunPolling(runId) {
     state.flowPollBusy = true;
     try {
       const run = await window.agentFirewall.getRunDetails(state.workspace, runId);
+      if (!run) return;
       state.lastRun = run;
       const events = (run.events || [])
         .filter((event) => ["node_started", "node_finished", "node_retrying", "run_paused", "run_resumed"].includes(event.event_type))
         .map(formatRunEvent);
       els.runStatus.textContent = translateStatus(run.status);
       els.runOutput.textContent = [`运行: ${run.run_id}`, ...events, run.final_summary || ""].filter(Boolean).join("\n");
+      els.runOutput.scrollTop = els.runOutput.scrollHeight;
+      setFlowDebug(
+        translateStatus(run.status),
+        flowRunReason(run) || (events.length ? `已收到 ${events.length} 条事件，最近节点：${events.at(-1)?.node_id || "流程"}` : "等待首个流程事件。"),
+        statusClass(run.status)
+      );
     } catch {
       // The run row may not exist during the first process startup tick.
     } finally {
@@ -2039,9 +2133,11 @@ function formatRunResult(result) {
     const events = (result.run.events || [])
       .filter((event) => ["node_started", "node_finished", "node_retrying", "run_paused", "run_resumed"].includes(event.event_type))
       .map((event) => formatRunEvent(event));
+    const reason = flowRunReason(result.run);
     return [
       `运行: ${result.run.run_id}`,
       `状态: ${translateStatus(result.run.status)}`,
+      reason ? `原因: ${reason}` : "",
       "",
       ...events,
       "",
@@ -2061,6 +2157,19 @@ function formatRunResult(result) {
     result.stderr || "（空）"
   ];
   return lines.filter((line) => line !== "").join("\n");
+}
+
+function flowRunReason(run) {
+  if (!run || !["blocked", "failed", "needs_input", "timeout"].includes(run.status)) return "";
+  const event = [...(run.events || [])].reverse().find((item) =>
+    ["node_finished", "run_paused"].includes(item.event_type) &&
+    ["blocked", "failed", "needs_input", "timeout"].includes(item.payload?.status)
+  );
+  const error = event?.payload?.error || event?.payload?.output?.policy_decision || {};
+  if (error.code === "environment_denied") return "阻塞原因：当前模型的凭据未获策略授权。请在“策略”中允许该模型使用凭据。";
+  if (error.code === "network_denied" || error.code === "network_host_denied") return "阻塞原因：当前模型需要网络访问，但策略未授权对应服务。";
+  if (error.code === "approval_required") return "阻塞原因：此节点需要你的确认后才能继续。";
+  return `阻塞原因：${error.message || event?.payload?.summary || run.summary || "流程被暂停，等待处理。"}`;
 }
 
 function formatRunEvent(event) {

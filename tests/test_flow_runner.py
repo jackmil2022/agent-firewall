@@ -4,8 +4,8 @@ from pathlib import Path
 import pytest
 
 from agent_firewall.config import load_config, write_default_config
-from agent_firewall.flow import FlowError, FlowSpec, load_flow, save_flow
-from agent_firewall.handoff import StepResult
+from agent_firewall.flow import FlowError, FlowNode, FlowSpec, load_flow, save_flow
+from agent_firewall.handoff import StepResult, TaskPacket
 from agent_firewall.runner import resume_flow, run_flow
 from agent_firewall.skills import install_bundled_skills
 from agent_firewall.store import AgentFirewallStore
@@ -54,6 +54,8 @@ def test_runner_writes_run_and_events_to_sqlite(tmp_path: Path) -> None:
     assert event_count >= 3
 
 
+
+
 def test_flow_adds_start_and_end_nodes() -> None:
     flow = FlowSpec.from_mapping(
         {
@@ -69,6 +71,15 @@ def test_flow_adds_start_and_end_nodes() -> None:
     assert [node.id for node in flow.nodes][-1] == "end"
     assert any(edge.from_node == "start" and edge.to_node == "agent:default" for edge in flow.edges)
     assert any(edge.from_node == "skill:creator" and edge.to_node == "end" for edge in flow.edges)
+
+
+def test_agent_node_goal_is_included_in_the_deepagent_prompt() -> None:
+    node = FlowNode(id="goal", type="agent", params={"goal": "检查工作区并总结风险"})
+    packet = TaskPacket(run_id="run", goal="Execute the configured goal chain.", node_id="goal")
+
+    prompt = runner._agent_prompt(node, packet)
+
+    assert "Node objective:\n检查工作区并总结风险" in prompt
 
 
 @pytest.mark.parametrize(

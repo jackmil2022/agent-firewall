@@ -344,6 +344,16 @@ def normalize_config_mapping(data: dict[str, Any]) -> dict[str, Any]:
         model_spec.setdefault("api_key_env", "")
         model_spec.setdefault("enabled", True)
         model_spec.setdefault("params", {})
+    enabled_models = [name for name, model in result["models"].items() if bool(model.get("enabled", True))]
+    if not enabled_models:
+        raise ConfigError("config requires exactly one enabled global model")
+    active_agent = str(result.get("active_agent") or next(iter(agents)))
+    active_model = str(agents.get(active_agent, {}).get("model") or "")
+    global_model = active_model if active_model in enabled_models else enabled_models[0]
+    for name, model_spec in result["models"].items():
+        model_spec["enabled"] = name == global_model
+    for agent in agents.values():
+        agent["model"] = global_model
     for agent in agents.values():
         agent.setdefault("allowed_mcp_tools", {})
     return result

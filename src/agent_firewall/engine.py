@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import os
 import sqlite3
+from urllib.error import HTTPError, URLError
+from urllib.request import ProxyHandler, Request, build_opener
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlsplit
@@ -252,13 +255,66 @@ def _resolve_model(model: str, config: AgentFirewallConfig | None = None) -> Any
         if api_key:
             kwargs["api_key"] = api_key
         if provider == "openai":
+            import httpx
             from langchain_openai import ChatOpenAI
 
-            return ChatOpenAI(**kwargs)
+            kwargs.setdefault("use_responses_api", False)
+            try:
+                return ChatOpenAI(**kwargs)
+            except httpx.InvalidURL as exc:
+                # ponytail: direct fallback only for malformed process proxy settings.
+                kwargs["http_client"] = httpx.Client(trust_env=False)
+                return ChatOpenAI(**kwargs)
         from langchain.chat_models import init_chat_model
 
         return init_chat_model(model_provider=provider, **kwargs)
     return model_value
+
+
+def probe_model_connection(config: AgentFirewallConfig) -> dict[str, str | bool]:
+    """Run the smallest useful request against the configured global model."""
+    preset = config.models[config.active.model]
+    if str(preset.get("provider") or "") == "openai" and preset.get("base_url"):
+        api_key = str(preset.get("api_key") or os.environ.get(str(preset.get("api_key_env") or "")) or "")
+        if not api_key:
+            raise EngineError("model connection requires an API key")
+        model_id = str(preset.get("model") or config.active.model).removeprefix("openai:")
+        payload = {
+            "model": model_id,
+            "messages": [{"role": "user", "content": "Reply with exactly: OK"}],
+            **dict(preset.get("params") or {}),
+        }
+        request = Request(
+            f"{str(preset['base_url']).rstrip('/')}/chat/completions",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0",
+            },
+            method="POST",
+        )
+        try:
+            with build_opener(ProxyHandler({})).open(request, timeout=20) as response:
+                body = json.loads(response.read().decode("utf-8"))
+        except HTTPError as exc:
+            raise EngineError(f"model connection failed: HTTP {exc.code}") from exc
+        except URLError as exc:
+            raise EngineError(f"model connection failed: {exc.reason}") from exc
+        content = body.get("choices", [{}])[0].get("message", {}).get("content", "")
+        return {"ok": True, "model": config.active.model, "response": str(content).strip()[:500]}
+    try:
+        response = _resolve_model(config.active.model, config).invoke("Reply with exactly: OK")
+    except Exception as exc:
+        raise EngineError(f"model connection failed: {type(exc).__name__}: {exc}") from exc
+    content = getattr(response, "content", response)
+    if isinstance(content, list):
+        content = " ".join(str(item) for item in content)
+    return {
+        "ok": True,
+        "model": config.active.model,
+        "response": str(content).strip()[:500],
+    }
 
 
 def _sqlite_checkpointer(workspace: Path) -> Any:
