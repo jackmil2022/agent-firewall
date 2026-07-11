@@ -606,13 +606,51 @@ p {
 }
 
 .panel-actions {
+  display: grid;
+  gap: 7px;
   padding: 8px 10px;
   border-top: 1px solid var(--line);
   background: #191c1f;
 }
 
-.panel-actions button {
+.case-run-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+}
+
+.case-run-actions #runTestCase {
   width: 100%;
+}
+
+.baseline-strip {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.baseline-strip > span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.baseline-strip strong,
+.baseline-strip code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.baseline-strip strong {
+  font-size: 11px;
+}
+
+.baseline-strip code {
+  color: var(--muted);
+  font-size: 9px;
 }
 
 .trace-list,
@@ -718,6 +756,35 @@ p {
 .revision-diff {
   min-height: 132px;
   max-height: 260px;
+  margin-top: 7px;
+}
+
+.revision-composer {
+  margin-top: 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #171a1d;
+}
+
+.revision-composer summary {
+  padding: 8px;
+  color: #cbd0d3;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.revision-composer[open] summary {
+  border-bottom: 1px solid var(--line);
+}
+
+.revision-composer .field-row,
+.revision-composer > button {
+  margin: 8px;
+}
+
+.revision-composer > button {
+  width: calc(100% - 16px);
 }
 
 .repair-actions {
@@ -797,7 +864,7 @@ p {
 }
 
 .capability-item {
-  grid-template-columns: 110px minmax(180px, 1fr) 80px 90px;
+  grid-template-columns: 110px minmax(180px, 1fr) 80px 90px minmax(100px, auto);
 }
 
 .capability-item > div:nth-child(2) {
@@ -831,6 +898,22 @@ p {
   background: #2b1e20;
 }
 
+.status-label.warning {
+  color: var(--amber);
+  border-color: #66552e;
+  background: #292419;
+}
+
+.capability-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.capability-actions button {
+  min-height: 28px;
+  font-size: 11px;
+}
+
 .table-shell {
   min-height: 0;
   margin: 8px;
@@ -843,7 +926,7 @@ p {
 
 .table-head {
   display: grid;
-  grid-template-columns: 150px minmax(220px, 1fr) 110px 100px 170px;
+  grid-template-columns: 130px minmax(220px, 1fr) 130px 80px 150px 120px;
   align-items: center;
   gap: 8px;
   padding: 0 10px;
@@ -860,7 +943,7 @@ p {
 }
 
 .run-history-row {
-  grid-template-columns: 150px minmax(220px, 1fr) 110px 100px 170px;
+  grid-template-columns: 130px minmax(220px, 1fr) 130px 80px 150px 120px;
   border-width: 0 0 1px;
   border-radius: 0;
 }
@@ -868,6 +951,51 @@ p {
 .run-history-row time,
 .run-history-row code {
   color: var(--muted);
+  font-size: 10px;
+}
+
+.run-context,
+.run-target,
+.run-comparison {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.run-context > span,
+.run-target > strong,
+.run-target > small,
+.run-comparison > small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-target small,
+.run-comparison small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.run-type-badge {
+  width: fit-content;
+  color: var(--cyan);
+  font: 9px/1.2 "SFMono-Regular", Consolas, monospace;
+}
+
+.run-type-badge.test {
+  color: var(--green);
+}
+
+.run-row-actions {
+  display: flex;
+  gap: 5px;
+  justify-content: flex-end;
+}
+
+.run-row-actions button {
+  min-height: 27px;
+  padding-inline: 7px;
   font-size: 10px;
 }
 

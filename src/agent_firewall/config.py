@@ -57,6 +57,7 @@ class AgentSpec:
     tools: list[str] = field(default_factory=list)
     subagents: list[SubAgentSpec] = field(default_factory=list)
     mcp_servers: dict[str, dict[str, Any]] = field(default_factory=dict)
+    allowed_mcp_tools: dict[str, list[str]] = field(default_factory=dict)
     interrupt_on: dict[str, bool | dict[str, Any]] = field(default_factory=dict)
     response_format: dict[str, Any] | None = None
     checkpoint: bool = True
@@ -75,6 +76,11 @@ class AgentSpec:
             tools=[str(item) for item in data.get("tools", [])],
             subagents=[SubAgentSpec.from_mapping(item) for item in data.get("subagents", [])],
             mcp_servers=dict(data.get("mcp_servers", {})),
+            allowed_mcp_tools={
+                str(server): [str(tool) for tool in tools]
+                for server, tools in dict(data.get("allowed_mcp_tools") or {}).items()
+                if isinstance(tools, list)
+            },
             interrupt_on=dict(data.get("interrupt_on", {})),
             response_format=dict(data["response_format"]) if isinstance(data.get("response_format"), dict) else None,
             checkpoint=bool(data.get("checkpoint", True)),
@@ -103,6 +109,8 @@ class PolicySpec:
     require_approval: list[str] = field(default_factory=list)
     allowed_commands: list[str] = field(default_factory=lambda: ["python"])
     allow_network: bool = False
+    allowed_network_hosts: list[str] = field(default_factory=list)
+    allowed_env_vars: list[str] = field(default_factory=list)
     exposed_env: list[str] = field(default_factory=list)
 
     @classmethod
@@ -112,6 +120,8 @@ class PolicySpec:
             require_approval=[str(item) for item in data.get("require_approval", [])],
             allowed_commands=[str(item) for item in data.get("allowed_commands", ["python"])],
             allow_network=bool(data.get("allow_network", False)),
+            allowed_network_hosts=[str(item) for item in data.get("allowed_network_hosts", [])],
+            allowed_env_vars=[str(item) for item in data.get("allowed_env_vars", [])],
             exposed_env=[str(item) for item in data.get("exposed_env", [])],
         )
 
@@ -162,6 +172,7 @@ def default_config(workspace: Path) -> dict[str, Any]:
                 "model": "fake:echo",
                 "provider": "fake",
                 "base_url": "",
+                "api_key": "",
                 "api_key_env": "",
                 "enabled": True,
                 "params": {"temperature": 0.2, "max_tokens": 4096},
@@ -203,6 +214,7 @@ def default_config(workspace: Path) -> dict[str, Any]:
                     },
                 ],
                 "mcp_servers": {},
+                "allowed_mcp_tools": {},
                 "interrupt_on": {},
                 "response_format": None,
                 "checkpoint": True,
@@ -217,6 +229,8 @@ def default_config(workspace: Path) -> dict[str, Any]:
             "require_approval": [],
             "allowed_commands": ["python"],
             "allow_network": False,
+            "allowed_network_hosts": [],
+            "allowed_env_vars": [],
             "exposed_env": [],
         },
     }
@@ -237,6 +251,7 @@ def _models_from_mapping(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
                     "model": model,
                     "provider": model.split(":", 1)[0],
                     "base_url": "",
+                    "api_key": "",
                     "api_key_env": "",
                     "enabled": True,
                     "params": {},
@@ -310,6 +325,7 @@ def normalize_config_mapping(data: dict[str, Any]) -> dict[str, Any]:
                 "model": model_name,
                 "provider": model_name.split(":", 1)[0] if ":" in model_name else "",
                 "base_url": "",
+                "api_key": "",
                 "api_key_env": "",
                 "enabled": True,
                 "params": {},
@@ -324,7 +340,10 @@ def normalize_config_mapping(data: dict[str, Any]) -> dict[str, Any]:
         if not str(model_spec.get("provider") or "").strip():
             model_spec["provider"] = str(model_spec["model"]).split(":", 1)[0] if ":" in str(model_spec["model"]) else "custom"
         model_spec.setdefault("base_url", "")
+        model_spec.setdefault("api_key", "")
         model_spec.setdefault("api_key_env", "")
         model_spec.setdefault("enabled", True)
         model_spec.setdefault("params", {})
+    for agent in agents.values():
+        agent.setdefault("allowed_mcp_tools", {})
     return result

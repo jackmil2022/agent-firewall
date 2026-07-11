@@ -60,7 +60,7 @@ def test_deepagent_kwargs_include_customization(tmp_path: Path) -> None:
     assert kwargs["checkpointer"].__class__.__name__ == "SqliteSaver"
 
 
-def test_deepagent_kwargs_resolve_named_model(tmp_path: Path) -> None:
+def test_deepagent_kwargs_resolve_named_model(tmp_path: Path, monkeypatch) -> None:
     write_default_config(tmp_path)
     install_bundled_skills(tmp_path)
     from agent_firewall.store import AgentFirewallStore
@@ -71,6 +71,11 @@ def test_deepagent_kwargs_resolve_named_model(tmp_path: Path) -> None:
     AgentFirewallStore(tmp_path).save_config(data)
     config = load_config(workspace=tmp_path)
 
+    class FakeChatModel:
+        pass
+
+    monkeypatch.setattr("langchain_openai.ChatOpenAI", lambda **_kwargs: FakeChatModel())
+
     kwargs = _deepagent_kwargs(
         fake_create_deep_agent,
         config,
@@ -79,7 +84,7 @@ def test_deepagent_kwargs_resolve_named_model(tmp_path: Path) -> None:
         FakeFilesystemBackend,
     )
 
-    assert kwargs["model"] == "openai:gpt-5"
+    assert isinstance(kwargs["model"], FakeChatModel)
 
 
 def test_deepagent_kwargs_include_recovery_config(tmp_path: Path) -> None:

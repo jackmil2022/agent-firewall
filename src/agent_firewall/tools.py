@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from functools import wraps
 from pathlib import Path
 from typing import Callable
 
@@ -31,9 +32,9 @@ def agent_policy_check(text: str) -> str:
     return json.dumps(result, ensure_ascii=False)
 
 
-def list_configured_skills(skill_root: str) -> str:
+def list_configured_skills(skill_root: str, *, workspace: Path | None = None) -> str:
     """List skills available under a skill root."""
-    manifests = list_skill_manifests(skill_root)
+    manifests = list_skill_manifests(_guarded_path(skill_root, workspace))
     return json.dumps(
         [
             {"name": item.name, "path": str(item.path), "description": item.description}
@@ -43,9 +44,9 @@ def list_configured_skills(skill_root: str) -> str:
     )
 
 
-def read_skill_manifest(skill_path: str) -> str:
+def read_skill_manifest(skill_path: str, *, workspace: Path | None = None) -> str:
     """Read a skill's SKILL.md frontmatter and first heading."""
-    path = Path(skill_path)
+    path = _guarded_path(skill_path, workspace)
     skill_md = path / "SKILL.md" if path.is_dir() else path
     text = skill_md.read_text(encoding="utf-8")
     lines = [line for line in text.splitlines() if line.strip()]
@@ -64,3 +65,28 @@ BUILTIN_TOOLS: dict[str, Callable[..., str]] = {
     "list_configured_skills": list_configured_skills,
     "read_skill_manifest": read_skill_manifest,
 }
+
+
+def bind_builtin_tool(name: str, workspace: Path) -> Callable[..., str]:
+    tool = BUILTIN_TOOLS[name]
+    if name not in {"list_configured_skills", "read_skill_manifest"}:
+        return tool
+
+    @wraps(tool)
+    def guarded(path: str) -> str:
+        return tool(path, workspace=workspace)
+
+    return guarded
+
+
+def _guarded_path(value: str | Path, workspace: Path | None) -> Path:
+    path = Path(value)
+    if workspace is None:
+        return path
+    root = workspace.resolve()
+    resolved = path.resolve() if path.is_absolute() else (root / path).resolve()
+    try:
+        resolved.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(f"Path is outside workspace: {value}") from exc
+    return resolved

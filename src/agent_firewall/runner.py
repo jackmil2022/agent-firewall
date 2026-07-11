@@ -11,10 +11,17 @@ from typing import Any
 from uuid import uuid4
 
 from .config import APP_DIR, AgentFirewallConfig
-from .engine import build_agent_sync
+from .engine import _load_mcp_tools, build_agent_sync
 from .flow import FlowEdge, FlowNode, FlowSpec, load_flow, validate_flow
 from .handoff import Handoff, StepResult, TaskPacket
-from .policy import ExecutionPolicy, check_operation
+from .policy import (
+    ExecutionPolicy,
+    PolicyViolation,
+    check_operation,
+    policy_from_config,
+    redact_data,
+    subprocess_environment,
+)
 from .skills import _read_manifest
 from .store import AgentFirewallStore
 
@@ -25,6 +32,16 @@ class RunnerError(RuntimeError):
 
 PAUSE_STATUSES = {"needs_input", "blocked"}
 RESUMABLE_STATUSES = PAUSE_STATUSES | {"failed"}
+POLICY_ERROR_CODES = {
+    "approval_required",
+    "command_denied",
+    "environment_denied",
+    "invalid_mcp_config",
+    "invalid_mcp_transport",
+    "network_denied",
+    "network_host_denied",
+    "path_outside_workspace",
+}
 
 
 def run_flow(
@@ -33,13 +50,16 @@ def run_flow(
     goal: str,
     flow_name: str = "default",
     flow_path: str | Path | None = None,
+    run_id: str | None = None,
 ) -> dict[str, Any]:
     flow = load_flow(config.workspace, config, name=flow_name, path=flow_path)
     validate_flow(flow, config, check_resources=True)
     store = AgentFirewallStore(config.workspace)
-    run_id = uuid4().hex
+    run_id = run_id or uuid4().hex
+    if store.get_run(run_id):
+        raise RunnerError(f"run already exists: {run_id}")
     store.create_run(run_id, goal, flow_name, flow.to_mapping())
-    store.log_event(run_id, "run_started", {"goal": goal, "flow_name": flow_name})
+    _log_event(config, store, run_id, "run_started", {"goal": goal, "flow_name": flow_name})
     state = _new_state(flow)
     store.save_checkpoint(run_id, state)
     return _execute_flow(config, flow, store, run_id, goal, state)
@@ -81,7 +101,14 @@ def resume_flow(config: AgentFirewallConfig, run_id: str, *, correction: str = "
     )
     state.setdefault("attempts", {})[paused_node] = 0
     store.reopen_run(run_id)
-    store.log_event(run_id, "run_resumed", {"node_id": paused_node, "correction": correction}, paused_node)
+    _log_event(
+        config,
+        store,
+        run_id,
+        "run_resumed",
+        {"node_id": paused_node, "correction": correction},
+        paused_node,
+    )
     return _execute_flow(config, flow, store, run_id, str(run["goal"]), state)
 
 
@@ -117,18 +144,20 @@ def _execute_flow(
 
     while len(completed) < len(nodes):
         if len([result for result in completed.values() if result["status"] != "skipped"]) >= flow.max_steps:
-            return _finish_failed(store, run_id, state, summaries, f"flow exceeded max steps: {flow.max_steps}")
+            return _finish_failed(
+                config, store, run_id, state, summaries, f"flow exceeded max steps: {flow.max_steps}"
+            )
 
         node = _next_ready_node(flow, completed)
         if node is None:
-            return _finish_failed(store, run_id, state, summaries, "flow cannot make progress")
+            return _finish_failed(config, store, run_id, state, summaries, "flow cannot make progress")
 
         incoming_edges = flow.incoming(node.id)
         active_edges = [edge for edge in incoming_edges if _edge_active(edge, completed)]
         if incoming_edges and not active_edges:
             result = StepResult(status="skipped", summary="no active incoming route")
             completed[node.id] = result.to_mapping()
-            store.log_event(run_id, "node_skipped", result.to_mapping(), node.id)
+            _log_event(config, store, run_id, "node_skipped", result.to_mapping(), node.id)
             _save_state(store, run_id, state, completed, attempts, summaries, corrections)
             continue
 
@@ -142,7 +171,9 @@ def _execute_flow(
             correction_kind=correction_kinds.pop(node.id, ""),
             idempotency_key=f"{run_id}:{node.id}",
         )
-        store.log_event(
+        _log_event(
+            config,
+            store,
             run_id,
             "node_started",
             {"node": _node_payload(node), "incoming": packet.incoming},
@@ -150,7 +181,7 @@ def _execute_flow(
         )
         result, node_attempts = _run_with_policy(config, node, packet, attempts.get(node.id, 0), store)
         attempts[node.id] = node_attempts
-        store.log_event(run_id, "node_finished", result.to_mapping(), node.id)
+        _log_event(config, store, run_id, "node_finished", result.to_mapping(), node.id)
 
         matching_edges = flow.outgoing(node.id, result.status)
         if result.status in PAUSE_STATUSES and not matching_edges:
@@ -167,13 +198,15 @@ def _execute_flow(
                 correction_kinds,
                 status=result.status,
             )
-            store.log_event(run_id, "run_paused", result.to_mapping(), node.id)
+            _log_event(config, store, run_id, "run_paused", result.to_mapping(), node.id)
             return _run_result(store, run_id, result.status, summaries + [f"{node.id}: {result.summary}"])
 
         completed[node.id] = result.to_mapping()
         summaries.append(f"{node.id}: {result.summary}")
         for edge in matching_edges:
-            store.log_event(
+            _log_event(
+                config,
+                store,
                 run_id,
                 "handoff_created",
                 _create_handoff(run_id, goal, node.id, edge.to_node, result),
@@ -182,15 +215,21 @@ def _execute_flow(
         _save_state(store, run_id, state, completed, attempts, summaries, corrections, correction_kinds)
 
         if result.status == "failed" and not matching_edges:
-            return _finish_failed(store, run_id, state, summaries, result.summary, failed_node=node.id)
+            return _finish_failed(
+                config, store, run_id, state, summaries, result.summary, failed_node=node.id
+            )
 
     end = next(node for node in flow.nodes if node.type == "end")
     end_result = completed.get(end.id, {})
     if end_result.get("status") != "success":
-        return _finish_failed(store, run_id, state, summaries, "flow did not reach end through an active route")
+        return _finish_failed(
+            config, store, run_id, state, summaries, "flow did not reach end through an active route"
+        )
     summary = "\n".join(summaries)
-    store.finish_run(run_id, "success", summary)
-    store.log_event(run_id, "run_finished", {"status": "success", "summary": summary})
+    if not store.finish_run(run_id, "success", summary):
+        run = store.get_run(run_id)
+        return _run_result(store, run_id, str((run or {}).get("status") or "cancelled"), summaries)
+    _log_event(config, store, run_id, "run_finished", {"status": "success", "summary": summary})
     return _run_result(store, run_id, "success", summaries)
 
 
@@ -238,6 +277,20 @@ def _run_with_policy(
     previous_attempts: int,
     store: AgentFirewallStore,
 ) -> tuple[StepResult, int]:
+    operation, policy_decision, approval = _capability_policy_decision(config, node, packet)
+    _log_event(
+        config,
+        store,
+        packet.run_id,
+        "policy_checked",
+        {
+            "operation": operation,
+            "code": policy_decision["code"],
+            "allowed": policy_decision["allowed"],
+            "approval": approval,
+        },
+        node.id,
+    )
     retry = dict(node.params.get("retry") or {})
     max_attempts = max(1, int(retry.get("max_attempts", 1)))
     delay_seconds = max(0.0, float(retry.get("delay_seconds", 0)))
@@ -249,9 +302,26 @@ def _run_with_policy(
         except Exception as exc:
             result = _exception_result(exc)
         result = _validate_result(node, result)
+        if result.error.get("code") in POLICY_ERROR_CODES and result.error.get("code") != policy_decision["code"]:
+            pause = dict(result.output.get("pause") or {})
+            _log_event(
+                config,
+                store,
+                packet.run_id,
+                "policy_checked",
+                {
+                    "operation": str(pause.get("operation") or operation),
+                    "code": result.error["code"],
+                    "allowed": False,
+                    "approval": approval,
+                },
+                node.id,
+            )
         if result.status != "failed" or not result.error.get("retryable") or attempt >= max_attempts:
             return result, attempt
-        store.log_event(
+        _log_event(
+            config,
+            store,
             packet.run_id,
             "node_retrying",
             {"attempt": attempt, "max_attempts": max_attempts, "error": result.error},
@@ -331,6 +401,7 @@ def _save_state(
 
 
 def _finish_failed(
+    config: AgentFirewallConfig,
     store: AgentFirewallStore,
     run_id: str,
     state: dict[str, Any],
@@ -339,13 +410,15 @@ def _finish_failed(
     *,
     failed_node: str = "",
 ) -> dict[str, Any]:
-    final_summaries = summaries + [f"failed: {error}"]
+    final_summaries = summaries + [_redact_text(config, f"failed: {error}")]
     summary = "\n".join(final_summaries)
     state["failed_node"] = failed_node
     store.save_checkpoint(run_id, state, status="failed")
-    store.log_event(run_id, "run_failed", {"error": error})
-    store.finish_run(run_id, "failed", summary)
-    store.log_event(run_id, "run_finished", {"status": "failed", "summary": summary})
+    _log_event(config, store, run_id, "run_failed", {"error": error})
+    if not store.finish_run(run_id, "failed", summary):
+        run = store.get_run(run_id)
+        return _run_result(store, run_id, str((run or {}).get("status") or "cancelled"), final_summaries)
+    _log_event(config, store, run_id, "run_finished", {"status": "failed", "summary": summary})
     return _run_result(store, run_id, "failed", final_summaries)
 
 
@@ -368,6 +441,37 @@ def _run_node(config: AgentFirewallConfig, node: FlowNode, packet: TaskPacket) -
     return run_capability_node(config, node, packet)
 
 
+def _capability_policy_decision(
+    config: AgentFirewallConfig,
+    node: FlowNode,
+    packet: TaskPacket,
+    *,
+    policy: ExecutionPolicy | None = None,
+    approved: bool = False,
+) -> tuple[str, dict[str, Any], bool]:
+    execution_policy = policy or policy_from_config(config)
+    operation = node.type
+    target_path = None
+    command = None
+    if node.type == "skill":
+        operation = "script"
+        skill_dir = _resolve_path(config.workspace, node.ref or str(node.meta.get("path") or ""))
+        target_path = skill_dir / str(node.params.get("script") or "")
+        command = "python"
+    elif node.type == "mcp":
+        operation = f"mcp:{node.params.get('tool') or 'call'}"
+    approved_operation = _approved_operation(packet)
+    approval = approved or approved_operation in {operation, "*"}
+    decision = check_operation(
+        execution_policy,
+        kind=operation,
+        path=target_path,
+        command=command,
+        approved=approval,
+    )
+    return operation, decision, approval
+
+
 def run_capability_node(
     config: AgentFirewallConfig,
     node: FlowNode,
@@ -376,48 +480,70 @@ def run_capability_node(
     policy: dict[str, Any] | None = None,
     approved: bool = False,
 ) -> StepResult:
-    policy_data = policy or {
-        "require_approval": config.policy.require_approval,
-        "allowed_commands": config.policy.allowed_commands,
-        "allow_network": config.policy.allow_network,
-        "exposed_env": config.policy.exposed_env,
-    }
-    execution_policy = ExecutionPolicy(
-        workspace=config.workspace,
-        require_approval=[str(item) for item in policy_data.get("require_approval", [])],
-        allowed_commands=[str(item) for item in policy_data.get("allowed_commands", ["python"])],
-        allow_network=bool(policy_data.get("allow_network", False)),
-        exposed_env=[str(item) for item in policy_data.get("exposed_env", [])],
+    execution_policy = policy_from_config(config, policy)
+    approved_operation = _approved_operation(packet)
+    operation, decision, _approval = _capability_policy_decision(
+        config,
+        node,
+        packet,
+        policy=execution_policy,
+        approved=approved,
     )
-    operation = node.type
-    target_path = None
-    if node.type == "skill":
-        operation = "script"
-        skill_dir = _resolve_path(config.workspace, node.ref or str(node.meta.get("path") or ""))
-        target_path = skill_dir / str(node.params.get("script") or "")
-    elif node.type == "mcp":
-        operation = f"mcp:{node.params.get('tool') or 'call'}"
-    decision = check_operation(execution_policy, kind=operation, path=target_path, approved=approved)
     if not decision["allowed"]:
-        status = "needs_input" if decision["code"] == "approval_required" else "blocked"
-        return StepResult(
-            status=status,
-            summary=decision["message"],
-            output={"pause": {"kind": "policy_approval", "operation": operation}},
-            error={"code": decision["code"], "message": decision["message"], "retryable": False},
-        )
-    if node.type in ("start", "end"):
-        return _run_boundary_node(node, packet)
-    if node.type == "agent":
-        return _run_agent_node(config, node, packet)
-    if node.type == "skill":
-        return _run_skill_node(config, node, packet)
-    if node.type == "mcp":
-        return _run_mcp_node(config, node, packet)
+        return _redact_result(config, _policy_result(decision, operation), execution_policy)
+    try:
+        if node.type in ("start", "end"):
+            result = _run_boundary_node(node, packet)
+        elif node.type == "agent":
+            result = _run_agent_node(
+                config,
+                node,
+                packet,
+                execution_policy,
+                approved=approved,
+                approved_operation=approved_operation,
+            )
+        elif node.type == "skill":
+            result = _run_skill_node(config, node, packet, execution_policy)
+        elif node.type == "mcp":
+            result = _run_mcp_node(
+                config,
+                node,
+                packet,
+                execution_policy,
+                approved=approved,
+                approved_operation=approved_operation,
+            )
+        else:
+            result = StepResult(
+                status="failed",
+                summary=f"unknown node type: {node.type}",
+                error={"code": "unknown_node_type", "message": node.type, "retryable": False},
+            )
+    except PolicyViolation as exc:
+        result = _policy_result(exc.decision, exc.operation or operation)
+    except Exception as exc:
+        result = _exception_result(exc)
+    return _redact_result(config, result, execution_policy)
+
+
+def _policy_result(decision: dict[str, Any], operation: str) -> StepResult:
+    approval = decision["code"] == "approval_required"
     return StepResult(
-        status="failed",
-        summary=f"unknown node type: {node.type}",
-        error={"code": "unknown_node_type", "message": node.type, "retryable": False},
+        status="needs_input" if approval else "blocked",
+        summary=str(decision["message"]),
+        output={
+            "pause": {
+                "kind": f"policy_approval:{operation}" if approval else "policy_block",
+                "operation": operation,
+            },
+            "policy_decision": dict(decision),
+        },
+        error={
+            "code": str(decision["code"]),
+            "message": str(decision["message"]),
+            "retryable": False,
+        },
     )
 
 
@@ -431,8 +557,18 @@ def _run_boundary_node(node: FlowNode, packet: TaskPacket) -> StepResult:
     )
 
 
-def _run_agent_node(config: AgentFirewallConfig, node: FlowNode, packet: TaskPacket) -> StepResult:
-    if node.params.get("requires_approval") and not packet.correction:
+def _run_agent_node(
+    config: AgentFirewallConfig,
+    node: FlowNode,
+    packet: TaskPacket,
+    policy: ExecutionPolicy,
+    *,
+    approved: bool,
+    approved_operation: str,
+) -> StepResult:
+    if node.params.get("requires_approval") and not (
+        approved or packet.correction_kind == "node_approval"
+    ):
         return StepResult(
             status="needs_input",
             summary=str(node.params.get("approval_prompt") or f"approval required before running {node.label}"),
@@ -440,10 +576,16 @@ def _run_agent_node(config: AgentFirewallConfig, node: FlowNode, packet: TaskPac
             error={"code": "approval_required", "message": "operator approval required", "retryable": False},
         )
     agent_name = node.ref or config.active_agent
-    agent = build_agent_sync(config, agent_name)
+    agent = build_agent_sync(
+        config,
+        agent_name,
+        policy=policy,
+        approved=approved,
+        approved_operation=approved_operation,
+    )
     response = _invoke_agent(
         agent,
-        packet.prompt(),
+        _agent_prompt(node, packet),
         run_id=packet.run_id,
         node_id=node.id,
         correction=packet.correction,
@@ -500,7 +642,12 @@ def _invoke_agent(
     return result
 
 
-def _run_skill_node(config: AgentFirewallConfig, node: FlowNode, packet: TaskPacket) -> StepResult:
+def _run_skill_node(
+    config: AgentFirewallConfig,
+    node: FlowNode,
+    packet: TaskPacket,
+    policy: ExecutionPolicy,
+) -> StepResult:
     skill_dir = _resolve_path(config.workspace, node.ref or str(node.meta.get("path") or ""))
     if not (skill_dir / "SKILL.md").exists():
         skill_dir = config.workspace / APP_DIR / "skills" / (node.ref or node.id.split(":", 1)[-1])
@@ -514,7 +661,7 @@ def _run_skill_node(config: AgentFirewallConfig, node: FlowNode, packet: TaskPac
     manifest = _read_manifest(skill_md)
     script = node.params.get("script")
     if script:
-        return _run_skill_script(skill_dir, str(script), packet, node)
+        return _run_skill_script(skill_dir, str(script), packet, node, policy)
     return StepResult(
         status="success",
         summary=f"loaded skill {manifest.name}: {manifest.description}",
@@ -523,7 +670,13 @@ def _run_skill_node(config: AgentFirewallConfig, node: FlowNode, packet: TaskPac
     )
 
 
-def _run_skill_script(skill_dir: Path, script: str, packet: TaskPacket, node: FlowNode) -> StepResult:
+def _run_skill_script(
+    skill_dir: Path,
+    script: str,
+    packet: TaskPacket,
+    node: FlowNode,
+    policy: ExecutionPolicy,
+) -> StepResult:
     script_path = (skill_dir / script).resolve()
     try:
         script_path.relative_to(skill_dir.resolve())
@@ -533,27 +686,47 @@ def _run_skill_script(skill_dir: Path, script: str, packet: TaskPacket, node: Fl
             summary="skill script must stay inside the skill directory",
             error={"code": "invalid_script_path", "message": script, "retryable": False},
         )
-    if not script_path.exists():
+    if script_path.suffix.lower() != ".py":
+        return StepResult(
+            status="blocked",
+            summary=f"unsupported script runtime: {script_path.suffix or 'missing extension'}",
+            error={
+                "code": "unsupported_script_runtime",
+                "message": script,
+                "retryable": False,
+            },
+        )
+    if not script_path.is_file():
         return StepResult(
             status="failed",
             summary=f"skill script not found: {script}",
             error={"code": "script_not_found", "message": script, "retryable": False},
         )
+    cwd = _resolve_path(policy.workspace, str(node.params.get("cwd") or policy.workspace)).resolve()
+    cwd_decision = check_operation(policy, kind="script", path=cwd, approved=True)
+    if not cwd_decision["allowed"]:
+        raise PolicyViolation(cwd_decision, "script")
+    configured_env = node.params.get("env") or {}
+    if not isinstance(configured_env, dict):
+        raise RunnerError("script params.env must be an object")
+    payload = {
+        "goal": packet.goal,
+        "incoming": packet.incoming,
+        "correction": packet.correction,
+        "correction_kind": packet.correction_kind,
+        "idempotency_key": packet.idempotency_key,
+        "input": node.params.get("input"),
+        "params": node.params,
+    }
     completed = subprocess.run(
-        [sys.executable, str(script_path)],
-        input=json.dumps(
-            {
-                "goal": packet.goal,
-                "incoming": packet.incoming,
-                "correction": packet.correction,
-                "idempotency_key": packet.idempotency_key,
-            },
-            ensure_ascii=False,
-        ),
+        _script_command(script_path),
+        input=json.dumps(payload, ensure_ascii=False),
         text=True,
         capture_output=True,
         timeout=float(node.params.get("timeout_seconds", 60)),
         check=False,
+        cwd=cwd,
+        env=subprocess_environment(policy, configured_env),
     )
     summary = (completed.stdout or completed.stderr).strip()
     output = _parse_json_object(completed.stdout)
@@ -577,14 +750,43 @@ def _run_skill_script(skill_dir: Path, script: str, packet: TaskPacket, node: Fl
     )
 
 
-def _run_mcp_node(config: AgentFirewallConfig, node: FlowNode, packet: TaskPacket) -> StepResult:
+def _script_command(script_path: Path) -> list[str]:
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "_script-run", "--file", str(script_path)]
+    return [sys.executable, str(script_path)]
+
+
+def _run_mcp_node(
+    config: AgentFirewallConfig,
+    node: FlowNode,
+    packet: TaskPacket,
+    policy: ExecutionPolicy,
+    *,
+    approved: bool,
+    approved_operation: str,
+) -> StepResult:
     tool_name = str(node.params["tool"])
-    args = dict(node.params.get("args") or {})
+    input_value = node.params.get("input")
+    args = dict(input_value) if isinstance(input_value, dict) else {}
+    if input_value is not None and not isinstance(input_value, dict):
+        args["input"] = input_value
+    args.update(dict(node.params.get("args") or {}))
     idempotency_arg = node.params.get("idempotency_arg")
     if idempotency_arg:
         args[str(idempotency_arg)] = packet.idempotency_key
     timeout = float(node.params.get("timeout_seconds", 60))
-    return asyncio.run(_call_mcp_tool(config, node, tool_name, args, timeout=timeout))
+    return asyncio.run(
+        _call_mcp_tool(
+            config,
+            node,
+            tool_name,
+            args,
+            timeout=timeout,
+            policy=policy,
+            approved=approved,
+            approved_operation=approved_operation,
+        )
+    )
 
 
 async def _call_mcp_tool(
@@ -594,16 +796,10 @@ async def _call_mcp_tool(
     args: dict[str, Any],
     *,
     timeout: float,
+    policy: ExecutionPolicy,
+    approved: bool,
+    approved_operation: str,
 ) -> StepResult:
-    try:
-        from langchain_mcp_adapters.client import MultiServerMCPClient
-    except ImportError:
-        return StepResult(
-            status="failed",
-            summary="langchain-mcp-adapters is not installed",
-            error={"code": "dependency_missing", "message": "langchain-mcp-adapters", "retryable": False},
-        )
-
     server_key = str(node.params.get("server") or node.ref)
     agent_key = str(node.meta.get("agent") or config.active_agent)
     server_config = config.agents.get(agent_key, config.active).mcp_servers.get(server_key)
@@ -617,7 +813,12 @@ async def _call_mcp_tool(
         )
 
     tools = await asyncio.wait_for(
-        MultiServerMCPClient({server_key: server_config}).get_tools(),
+        _load_mcp_tools(
+            {server_key: server_config},
+            policy=policy,
+            approved=approved,
+            approved_operation=approved_operation,
+        ),
         timeout=timeout,
     )
     tool = next((item for item in tools if getattr(item, "name", "") == tool_name), None)
@@ -654,6 +855,81 @@ async def _call_mcp_tool(
 def _resolve_path(workspace: Path, value: str) -> Path:
     path = Path(value)
     return path if path.is_absolute() else workspace / path
+
+
+def _approved_operation(packet: TaskPacket) -> str:
+    if packet.correction_kind == "policy_approval":
+        return "*"
+    prefix = "policy_approval:"
+    return packet.correction_kind[len(prefix) :] if packet.correction_kind.startswith(prefix) else ""
+
+
+def _agent_prompt(node: FlowNode, packet: TaskPacket) -> str:
+    prompt = packet.prompt()
+    if not node.params:
+        return prompt
+    capability_input = json.dumps(_jsonable(node.params), ensure_ascii=False)
+    return f"{prompt}\n\nCapability input:\n{capability_input}"
+
+
+def _redact_result(
+    config: AgentFirewallConfig,
+    result: StepResult,
+    policy: ExecutionPolicy | None = None,
+) -> StepResult:
+    mapping = _redact_value(config, result.to_mapping(), policy)
+    return StepResult(
+        status=mapping["status"],
+        summary=mapping["summary"],
+        output=mapping["output"],
+        error=mapping["error"],
+        artifacts=mapping["artifacts"],
+        handoff=mapping["handoff"],
+    )
+
+
+def _log_event(
+    config: AgentFirewallConfig,
+    store: AgentFirewallStore,
+    run_id: str,
+    event_type: str,
+    payload: dict[str, Any],
+    node_id: str | None = None,
+) -> None:
+    store.log_event(run_id, event_type, _redact_value(config, payload), node_id)
+
+
+def _redact_text(config: AgentFirewallConfig, value: str) -> str:
+    return str(_redact_value(config, value))
+
+
+def _redact_value(
+    config: AgentFirewallConfig,
+    value: Any,
+    policy: ExecutionPolicy | None = None,
+) -> Any:
+    execution_policy = policy or policy_from_config(config)
+    names = set(execution_policy.environment_names)
+    names.update(
+        str(model.get("api_key_env"))
+        for model in config.models.values()
+        if model.get("api_key_env")
+    )
+    return redact_data(value, names, secret_values=_configured_secret_values(config))
+
+
+def _configured_secret_values(config: AgentFirewallConfig) -> set[str]:
+    values: set[str] = set()
+    values.update(str(model.get("api_key")) for model in config.models.values() if model.get("api_key"))
+    for agent in config.agents.values():
+        for server in agent.mcp_servers.values():
+            values.update(str(value) for value in dict(server.get("env") or {}).values() if value)
+            values.update(
+                str(value)
+                for key, value in dict(server.get("headers") or {}).items()
+                if value and any(part in str(key).lower() for part in ("authorization", "key", "secret", "token"))
+            )
+    return values
 
 
 def _response_text(response: Any) -> str:

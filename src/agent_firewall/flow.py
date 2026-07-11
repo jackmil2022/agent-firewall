@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import APP_DIR, AgentFirewallConfig
-from .store import AgentFirewallStore
+from .store import AgentFirewallStore, snapshot_hash
 
 FLOW_FILE = "flow.json"
 NODE_TYPES = {"start", "end", "agent", "skill", "mcp"}
@@ -235,29 +235,56 @@ def _validate_node_resource(node: FlowNode, config: AgentFirewallConfig) -> None
             raise FlowError(f"agent node '{node.id}' references unknown agent '{agent_key}'")
     elif node.type == "skill":
         value = node.ref or str(node.meta.get("path") or "")
-        skill_dir = _resolve_resource_path(config.workspace, value)
-        if not (skill_dir / "SKILL.md").exists():
+        skill_dir = _resolve_resource_path(config.workspace, value).resolve()
+        if not (skill_dir / "SKILL.md").is_file():
             fallback = config.workspace / APP_DIR / "skills" / (value or node.id.split(":", 1)[-1])
-            if not (fallback / "SKILL.md").exists():
+            if not (fallback / "SKILL.md").is_file():
                 raise FlowError(f"skill node '{node.id}' manifest not found")
+            skill_dir = fallback.resolve()
         script = node.params.get("script")
         if not script:
             raise FlowError(f"skill node '{node.id}' requires params.script")
         if not isinstance(script, str):
             raise FlowError(f"skill node '{node.id}' script must be a string")
+        script_path = (skill_dir / script).resolve()
+        if not script_path.is_relative_to(skill_dir):
+            raise FlowError(f"skill node '{node.id}' script must stay inside the skill directory")
+        if script_path.suffix.lower() != ".py":
+            raise FlowError(f"skill node '{node.id}' only supports Python Script Actions")
+        if not script_path.is_file():
+            raise FlowError(f"skill node '{node.id}' script not found: {script}")
     elif node.type == "mcp":
         server_key = str(node.params.get("server") or node.ref)
         agent_key = str(node.meta.get("agent") or config.active_agent)
         agent = config.agents.get(agent_key)
-        inline = node.meta.get("config")
-        if not agent and not isinstance(inline, dict):
+        if not agent:
             raise FlowError(f"mcp node '{node.id}' references unknown agent '{agent_key}'")
-        if not isinstance(inline, dict) and server_key not in agent.mcp_servers:
+        if isinstance(node.meta.get("config"), dict):
+            raise FlowError(f"mcp node '{node.id}' cannot use inline server config")
+        if server_key not in agent.mcp_servers:
             raise FlowError(f"mcp node '{node.id}' references unknown server '{server_key}'")
-        if not node.params.get("tool"):
+        tool_name = str(node.params.get("tool") or "")
+        if not tool_name:
             raise FlowError(f"mcp node '{node.id}' requires params.tool")
         if not isinstance(node.params.get("args", {}), dict):
             raise FlowError(f"mcp node '{node.id}' params.args must be an object")
+        discovered = AgentFirewallStore(config.workspace).get_discovered_mcp_tool(
+            agent_key, server_key, tool_name
+        )
+        if not discovered:
+            raise FlowError(f"mcp node '{node.id}' tool was not discovered: {tool_name}")
+        if discovered.get("server_config_hash") != snapshot_hash(agent.mcp_servers[server_key]):
+            raise FlowError(f"mcp node '{node.id}' tool discovery is stale: {tool_name}")
+        schema = discovered.get("input_schema")
+        if not schema:
+            raise FlowError(f"mcp node '{node.id}' tool has no discovered input schema: {tool_name}")
+        args = _mcp_node_args(node)
+        try:
+            from jsonschema import SchemaError, ValidationError, validate
+
+            validate(instance=args, schema=schema)
+        except (SchemaError, ValidationError) as exc:
+            raise FlowError(f"mcp node '{node.id}' arguments do not match discovered schema: {exc.message}") from exc
     retry = dict(node.params.get("retry") or {})
     if int(retry.get("max_attempts", 1)) > 1 and not node.params.get("idempotent"):
         raise FlowError(f"node '{node.id}' must set params.idempotent=true before enabling retries")
@@ -266,6 +293,15 @@ def _validate_node_resource(node: FlowNode, config: AgentFirewallConfig) -> None
 def _resolve_resource_path(workspace: Path, value: str) -> Path:
     path = Path(value)
     return path if path.is_absolute() else workspace / path
+
+
+def _mcp_node_args(node: FlowNode) -> dict[str, Any]:
+    input_value = node.params.get("input")
+    args = dict(input_value) if isinstance(input_value, dict) else {}
+    if input_value is not None and not isinstance(input_value, dict):
+        args["input"] = input_value
+    args.update(node.params.get("args") or {})
+    return args
 
 
 def load_flow(

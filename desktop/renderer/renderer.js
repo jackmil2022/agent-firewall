@@ -6,13 +6,26 @@ const state = {
   selectedNodeId: null,
   editor: null,
   renderingFlow: false,
-  activeView: "flow",
+  activeView: "workbench",
   selectedModelKey: "",
   canvasPan: null,
   lastRun: null,
-  layoutAdjusted: false
-  ,selectedTestCaseId: null
-  ,baselineRunId: null
+  layoutAdjusted: false,
+  selectedTestCaseId: null,
+  selectedRevisionId: null,
+  pendingRevisionId: null,
+  lastTestResult: null,
+  activeTestOperationId: null,
+  activeFlowOperationId: null,
+  testStartedAt: null,
+  testPollTimer: null,
+  testPollBusy: false,
+  flowPollTimer: null,
+  flowPollBusy: false,
+  runStatusFilter: "",
+  capabilityQuery: "",
+  capabilityKind: "",
+  mcpDiscoveryStatus: {}
 };
 
 const els = {
@@ -52,6 +65,7 @@ const els = {
   modelProviderInput: document.querySelector("#modelProviderInput"),
   modelValueInput: document.querySelector("#modelValueInput"),
   modelBaseUrlInput: document.querySelector("#modelBaseUrlInput"),
+  modelApiKeyInput: document.querySelector("#modelApiKeyInput"),
   modelApiKeyEnvInput: document.querySelector("#modelApiKeyEnvInput"),
   modelEnabledInput: document.querySelector("#modelEnabledInput"),
   modelTemperatureInput: document.querySelector("#modelTemperatureInput"),
@@ -64,6 +78,7 @@ const els = {
   acpUnstableInput: document.querySelector("#acpUnstableInput"),
   acpBufferInput: document.querySelector("#acpBufferInput"),
   mcpServersInput: document.querySelector("#mcpServersInput"),
+  allowedMcpToolsInput: document.querySelector("#allowedMcpToolsInput"),
   modelStatus: document.querySelector("#modelStatus")
   ,workbenchView: document.querySelector("#workbenchView")
   ,capabilityView: document.querySelector("#capabilityView")
@@ -78,20 +93,50 @@ const els = {
   ,testInputJson: document.querySelector("#testInputJson")
   ,testAssertionsJson: document.querySelector("#testAssertionsJson")
   ,saveTestCase: document.querySelector("#saveTestCase")
+  ,newTestCase: document.querySelector("#newTestCase")
   ,runTestCase: document.querySelector("#runTestCase")
   ,rerunTestCase: document.querySelector("#rerunTestCase")
   ,traceList: document.querySelector("#traceList")
   ,diagnosisPanel: document.querySelector("#diagnosisPanel")
+  ,evidenceSection: document.querySelector(".evidence-section")
   ,capabilityList: document.querySelector("#capabilityList")
+  ,capabilitySearch: document.querySelector("#capabilitySearch")
+  ,configureCapability: document.querySelector("#configureCapability")
   ,runHistoryList: document.querySelector("#runHistoryList")
+  ,runStatusFilter: document.querySelector("#runStatusFilter")
+  ,refreshRuns: document.querySelector("#refreshRuns")
   ,policyWorkspace: document.querySelector("#policyWorkspace")
   ,savePolicy: document.querySelector("#savePolicy")
+  ,runPolicyCheck: document.querySelector("#runPolicyCheck")
+  ,policyAgentApproval: document.querySelector("#policyAgentApproval")
   ,policyScriptApproval: document.querySelector("#policyScriptApproval")
   ,policyMcpApproval: document.querySelector("#policyMcpApproval")
   ,policyAllowNetwork: document.querySelector("#policyAllowNetwork")
+  ,policyNetworkHosts: document.querySelector("#policyNetworkHosts")
   ,policyCommands: document.querySelector("#policyCommands")
   ,policyExposedEnv: document.querySelector("#policyExposedEnv")
   ,approveOperation: document.querySelector("#approveOperation")
+  ,setBaseline: document.querySelector("#setBaseline")
+  ,baselineStatus: document.querySelector("#baselineStatus")
+  ,baselineRunId: document.querySelector("#baselineRunId")
+  ,cancelTestRun: document.querySelector("#cancelTestRun")
+  ,workbenchStatusDot: document.querySelector("#workbenchStatusDot")
+  ,workbenchStatusText: document.querySelector("#workbenchStatusText")
+  ,traceStatus: document.querySelector("#traceStatus")
+  ,traceEventCount: document.querySelector("#traceEventCount")
+  ,traceDuration: document.querySelector("#traceDuration")
+  ,revisionSelect: document.querySelector("#revisionSelect")
+  ,revisionState: document.querySelector("#revisionState")
+  ,revisionDiff: document.querySelector("#revisionDiff")
+  ,revisionTarget: document.querySelector("#revisionTarget")
+  ,revisionReason: document.querySelector("#revisionReason")
+  ,revisionAfterJson: document.querySelector("#revisionAfterJson")
+  ,createRevision: document.querySelector("#createRevision")
+  ,applyRevision: document.querySelector("#applyRevision")
+  ,revertRevision: document.querySelector("#revertRevision")
+  ,runRevisionCandidate: document.querySelector("#runRevisionCandidate")
+  ,reviewRevision: document.querySelector("#reviewRevision")
+  ,cancelFlow: document.querySelector("#cancelFlow")
 };
 
 window.addEventListener("DOMContentLoaded", async () => {
@@ -99,6 +144,28 @@ window.addEventListener("DOMContentLoaded", async () => {
   wireEvents();
   await loadWorkspace();
 });
+
+window.addEventListener("unhandledrejection", (event) => {
+  event.preventDefault();
+  showActionError(event.reason);
+});
+
+function showActionError(error) {
+  const message = error instanceof Error ? error.message : String(error || "未知错误");
+  els.workspacePath.textContent = `操作失败：${message}`;
+  if (state.activeView === "workbench") setWorkbenchError(message);
+  if (state.activeView === "advanced") {
+    els.runStatus.textContent = "错误";
+    els.runOutput.textContent = message;
+  }
+  if (state.activeView === "settings") els.modelStatus.textContent = `操作失败：${message}`;
+  if (state.activeView === "policy") {
+    const status = document.querySelector("#policyStatus strong");
+    const detail = document.querySelector("#policyStatus small");
+    if (status) status.textContent = "操作失败";
+    if (detail) detail.textContent = message;
+  }
+}
 
 function wireEvents() {
   document.querySelectorAll(".view-toggle").forEach((button) => {
@@ -141,19 +208,57 @@ function wireEvents() {
   els.addModel.addEventListener("click", () => addModelConfig());
   els.deleteModel.addEventListener("click", () => deleteModelConfig());
   els.saveTestCase?.addEventListener("click", () => saveWorkbenchCase());
+  els.newTestCase?.addEventListener("click", () => newWorkbenchCase());
   els.runTestCase?.addEventListener("click", () => executeWorkbenchCase());
-  els.rerunTestCase?.addEventListener("click", () => executeWorkbenchCase(state.baselineRunId));
+  els.rerunTestCase?.addEventListener("click", () => executeWorkbenchCase());
   els.testTargetSelect?.addEventListener("change", () => applyTargetDefaults());
   els.savePolicy?.addEventListener("click", () => savePolicyConfig());
-  els.approveOperation?.addEventListener("click", () => executeWorkbenchCase("", true));
+  els.runPolicyCheck?.addEventListener("click", () => runPolicyCheck());
+  els.approveOperation?.addEventListener("click", () => executeWorkbenchCase(true, state.pendingRevisionId));
+  els.setBaseline?.addEventListener("click", () => setCurrentRunAsBaseline());
+  els.cancelTestRun?.addEventListener("click", () => cancelActiveTestRun());
+  els.runStatusFilter?.addEventListener("change", () => {
+    state.runStatusFilter = els.runStatusFilter.value;
+    renderRunHistory(state.data?.runs || []);
+  });
+  els.refreshRuns?.addEventListener("click", async () => {
+    try {
+      await refreshWorkspaceData();
+    } catch (error) {
+      els.workspacePath.textContent = error.message;
+    }
+  });
+  els.capabilitySearch?.addEventListener("input", () => {
+    state.capabilityQuery = els.capabilitySearch.value.trim().toLowerCase();
+    renderCapabilityList(state.data?.capabilities || []);
+  });
+  document.querySelectorAll("[data-capability-kind]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.capabilityKind = button.dataset.capabilityKind;
+      document.querySelectorAll("[data-capability-kind]").forEach((item) => item.classList.toggle("active", item === button));
+      renderCapabilityList(state.data?.capabilities || []);
+    });
+  });
+  els.configureCapability?.addEventListener("click", () => setActiveView("settings"));
+  els.revisionSelect?.addEventListener("change", () => selectRevision(Number(els.revisionSelect.value) || null));
+  els.createRevision?.addEventListener("click", () => createWorkbenchRevision());
+  els.runRevisionCandidate?.addEventListener("click", () => executeWorkbenchCase(false, state.selectedRevisionId));
+  els.reviewRevision?.addEventListener("click", () => reviewSelectedRevision());
+  els.applyRevision?.addEventListener("click", () => applySelectedRevision());
+  els.revertRevision?.addEventListener("click", () => revertSelectedRevision());
+  els.cancelFlow?.addEventListener("click", () => cancelActiveFlowRun());
 
   els.startFlow.addEventListener("click", async () => {
     if (!state.workspace || !state.data) return;
+    const operationId = crypto.randomUUID();
+    state.activeFlowOperationId = operationId;
+    startFlowRunPolling(operationId);
     els.startFlow.disabled = true;
-    els.runStatus.textContent = "启动中";
-    els.runOutput.textContent = "正在保存并运行当前编排...";
+    els.cancelFlow.disabled = false;
+    els.runStatus.textContent = "运行中";
+    els.runOutput.textContent = "本地后端进程运行中，正在从 SQLite 增量载入事件。";
     try {
-      const result = await window.agentFirewall.startFlow(state.workspace, currentFlow());
+      const result = await window.agentFirewall.startFlow(state.workspace, currentFlow(), operationId);
       state.lastRun = result.run;
       els.runStatus.textContent = translateStatus(result.status);
       els.runOutput.textContent = formatRunResult(result);
@@ -163,7 +268,10 @@ function wireEvents() {
       els.runStatus.textContent = "错误";
       els.runOutput.textContent = error.message;
     } finally {
+      stopFlowRunPolling();
+      if (state.activeFlowOperationId === operationId) state.activeFlowOperationId = null;
       els.startFlow.disabled = false;
+      els.cancelFlow.disabled = true;
     }
   });
 
@@ -171,13 +279,18 @@ function wireEvents() {
     if (!state.workspace || !state.lastRun?.run_id) return;
     const correction = window.prompt("输入修正内容或审批 decisions JSON。", "");
     if (correction === null) return;
+    const operationId = state.lastRun.run_id;
+    state.activeFlowOperationId = operationId;
+    startFlowRunPolling(operationId);
     els.resumeFlow.disabled = true;
-    els.runStatus.textContent = "继续中";
+    els.cancelFlow.disabled = false;
+    els.runStatus.textContent = "恢复中";
     try {
       const result = await window.agentFirewall.resumeFlow(
         state.workspace,
         state.lastRun.run_id,
-        correction
+        correction,
+        operationId
       );
       state.lastRun = result.run;
       els.runStatus.textContent = translateStatus(result.status);
@@ -186,6 +299,10 @@ function wireEvents() {
     } catch (error) {
       els.runStatus.textContent = "错误";
       els.runOutput.textContent = error.message;
+    } finally {
+      stopFlowRunPolling();
+      if (state.activeFlowOperationId === operationId) state.activeFlowOperationId = null;
+      els.cancelFlow.disabled = true;
     }
   });
 
@@ -858,6 +975,7 @@ function renderModelForm() {
   els.modelProviderInput.value = model.provider || "";
   els.modelValueInput.value = model.model || "";
   els.modelBaseUrlInput.value = model.base_url || "";
+  els.modelApiKeyInput.value = model.api_key || "";
   els.modelApiKeyEnvInput.value = model.api_key_env || "";
   els.modelEnabledInput.checked = Boolean(model.enabled ?? true);
   els.modelTemperatureInput.value = params.temperature ?? "";
@@ -883,6 +1001,7 @@ function renderModelForm() {
     ? JSON.stringify(agent.response_format, null, 2)
     : "";
   els.mcpServersInput.value = JSON.stringify(agent.mcp_servers || {}, null, 2);
+  els.allowedMcpToolsInput.value = JSON.stringify(agent.allowed_mcp_tools || {}, null, 2);
   els.acpEnabledInput.checked = Boolean(config.acp?.enabled ?? true);
   els.acpUnstableInput.checked = Boolean(config.acp?.use_unstable_protocol);
   els.acpBufferInput.value = String(config.acp?.stdio_buffer_limit_bytes || 52428800);
@@ -942,10 +1061,12 @@ async function saveModelConfig() {
   }
 
   let mcpServers;
+  let allowedMcpTools;
   let interruptOn;
   let responseFormat;
   try {
     mcpServers = JSON.parse(els.mcpServersInput.value || "{}");
+    allowedMcpTools = JSON.parse(els.allowedMcpToolsInput.value || "{}");
     interruptOn = JSON.parse(els.agentInterruptInput.value || "{}");
     responseFormat = els.agentResponseFormatInput.value.trim()
       ? JSON.parse(els.agentResponseFormatInput.value)
@@ -968,6 +1089,7 @@ async function saveModelConfig() {
     provider: els.modelProviderInput.value.trim(),
     model: els.modelValueInput.value.trim(),
     base_url: els.modelBaseUrlInput.value.trim(),
+    api_key: els.modelApiKeyInput.value,
     api_key_env: els.modelApiKeyEnvInput.value.trim(),
     enabled: els.modelEnabledInput.checked,
     params: compactModelParams()
@@ -981,6 +1103,7 @@ async function saveModelConfig() {
     model: selectedAgentModel || newModelKey,
     system_prompt: els.systemPromptInput.value,
     mcp_servers: mcpServers,
+    allowed_mcp_tools: allowedMcpTools,
     interrupt_on: interruptOn,
     response_format: responseFormat,
     checkpoint: els.agentCheckpointInput.checked
@@ -999,7 +1122,7 @@ async function saveModelConfig() {
     const reloaded = await window.agentFirewall.loadWorkspace(state.workspace);
     state.selectedModelKey = newModelKey;
     setWorkspaceData(reloaded);
-    setActiveView("model");
+    setActiveView("settings");
     els.modelStatus.textContent = `已保存到 ${result.database}`;
   } catch (error) {
     els.modelStatus.textContent = error.message;
@@ -1018,6 +1141,7 @@ function ensureModels(config) {
         provider: model.includes(":") ? model.split(":", 1)[0] : "",
         model,
         base_url: "",
+        api_key: "",
         api_key_env: "",
         enabled: true,
         params: {}
@@ -1056,6 +1180,7 @@ function addModelConfig() {
     provider: "openai",
     model: "openai:gpt-5",
     base_url: "",
+    api_key: "",
     api_key_env: "OPENAI_API_KEY",
     enabled: true,
     params: { temperature: 0.2, max_tokens: 4096 }
@@ -1103,13 +1228,24 @@ function renderWorkbench() {
   if (!state.data) return;
   const capabilities = state.data.capabilities || [];
   const targets = capabilities.filter((item) => item.executable);
+  const previousTarget = els.testTargetSelect.value;
   els.testTargetSelect.innerHTML = [
-    '<option value="">选择 Agent、Script Action 或 MCP Tool</option>',
-    ...targets.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)} · ${translateCapabilityKind(item.kind)}</option>`)
+    '<option value="">选择 Agent、Skill Binding、Script Action 或 MCP Tool</option>',
+    ...targets.map((item) => {
+      const unavailable = item.health === "issue";
+      const suffix = unavailable ? ` · 不可用：${item.health_issue || "健康检查失败"}` : "";
+      return `<option value="${escapeHtml(item.id)}" ${unavailable ? "disabled" : ""}>${escapeHtml(item.name)} · ${translateCapabilityKind(item.kind)}${escapeHtml(suffix)}</option>`;
+    })
   ].join("");
+  els.testTargetSelect.value = targets.some((item) => item.id === previousTarget) ? previousTarget : "";
   renderCapabilityList(capabilities);
-  renderTestCaseList(state.data.testCases || []);
+  const cases = state.data.testCases || [];
+  if (!cases.some((item) => item.id === state.selectedTestCaseId)) state.selectedTestCaseId = cases[0]?.id || null;
+  renderTestCaseList(cases);
+  if (state.selectedTestCaseId) selectTestCase(state.selectedTestCaseId, { preserveRun: true });
+  else renderBaselineState();
   renderRunHistory(state.data.runs || []);
+  renderRevisionControls();
   if (els.policyWorkspace) els.policyWorkspace.value = state.workspace || "";
   renderPolicyConfig();
 }
@@ -1117,23 +1253,37 @@ function renderWorkbench() {
 function renderPolicyConfig() {
   const policy = state.data?.config?.policy || {};
   const approvals = policy.require_approval || [];
+  if (els.policyAgentApproval) els.policyAgentApproval.checked = approvals.includes("agent");
   if (els.policyScriptApproval) els.policyScriptApproval.checked = approvals.includes("script");
   if (els.policyMcpApproval) els.policyMcpApproval.checked = approvals.includes("mcp:*");
   if (els.policyAllowNetwork) els.policyAllowNetwork.checked = Boolean(policy.allow_network);
+  if (els.policyNetworkHosts) els.policyNetworkHosts.value = (policy.allowed_network_hosts || []).join("\n");
   if (els.policyCommands) els.policyCommands.value = (policy.allowed_commands || ["python"]).join("\n");
-  if (els.policyExposedEnv) els.policyExposedEnv.value = (policy.exposed_env || []).join("\n");
+  if (els.policyExposedEnv) {
+    els.policyExposedEnv.value = [
+      ...new Set([...(policy.allowed_env_vars || []), ...(policy.exposed_env || [])])
+    ].join("\n");
+  }
 }
 
 async function savePolicyConfig() {
   const config = structuredClone(state.data.config);
+  const currentPolicy = config.policy || {};
+  const representedApprovals = new Set(["agent", "script", "mcp:*"]);
+  const envNames = lines(els.policyExposedEnv.value);
   config.policy = {
+    ...currentPolicy,
     require_approval: [
+      ...(currentPolicy.require_approval || []).filter((item) => !representedApprovals.has(item)),
+      ...(els.policyAgentApproval.checked ? ["agent"] : []),
       ...(els.policyScriptApproval.checked ? ["script"] : []),
       ...(els.policyMcpApproval.checked ? ["mcp:*"] : [])
     ],
-    allowed_commands: els.policyCommands.value.split("\n").map((item) => item.trim()).filter(Boolean),
+    allowed_commands: lines(els.policyCommands.value),
     allow_network: els.policyAllowNetwork.checked,
-    exposed_env: els.policyExposedEnv.value.split("\n").map((item) => item.trim()).filter(Boolean)
+    allowed_network_hosts: lines(els.policyNetworkHosts.value),
+    allowed_env_vars: envNames,
+    exposed_env: envNames
   };
   await window.agentFirewall.saveConfig(state.workspace, config);
   state.data.config = config;
@@ -1141,45 +1291,294 @@ async function savePolicyConfig() {
   if (status) status.textContent = "策略已保存";
 }
 
+function runPolicyCheck() {
+  const commands = lines(els.policyCommands.value);
+  const hosts = lines(els.policyNetworkHosts.value);
+  const envNames = lines(els.policyExposedEnv.value);
+  const invalidEnv = envNames.filter((name) => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name));
+  const status = document.querySelector("#policyStatus strong");
+  const detail = document.querySelector("#policyStatus small");
+  const dot = document.querySelector("#policyStatus .status-dot");
+  let message = "策略字段有效";
+  let description = "命令、网络和环境变量规则可被执行器读取";
+  let className = "success";
+  if (!commands.length) {
+    message = "所有 Script Action 将被阻止";
+    description = "命令白名单为空";
+    className = "idle";
+  } else if (invalidEnv.length) {
+    message = "环境变量名无效";
+    description = invalidEnv.join(", ");
+    className = "danger";
+  } else if (els.policyAllowNetwork.checked && !hosts.length) {
+    message = "网络范围过宽";
+    description = "允许外部网络但未限制主机";
+    className = "idle";
+  }
+  status.textContent = message;
+  detail.textContent = description;
+  dot.className = `status-dot ${className}`;
+}
+
+function lines(value) {
+  return [...new Set(String(value || "").split("\n").map((item) => item.trim()).filter(Boolean))];
+}
+
+function renderRevisionControls() {
+  const revisions = state.data?.revisions || [];
+  if (!revisions.some((item) => item.id === state.selectedRevisionId)) state.selectedRevisionId = revisions[0]?.id || null;
+  els.revisionSelect.innerHTML = [
+    '<option value="">选择修订</option>',
+    ...revisions.map((item) => `<option value="${item.id}">#${item.id} · ${escapeHtml(item.target_type)}:${escapeHtml(item.target_ref)} · ${translateRevisionStatus(item.status)}</option>`)
+  ].join("");
+  els.revisionSelect.value = state.selectedRevisionId || "";
+
+  const currentTarget = els.revisionTarget.value;
+  const targets = (state.data?.testCases || []).filter((testCase) => testCase.baseline_run_id).map((testCase) => ({
+    value: String(testCase.id),
+    label: `${testCase.name} · ${translateCapabilityKind(testCase.target_type)} · 有基线`
+  }));
+  els.revisionTarget.innerHTML = [
+    '<option value="">选择已有基线的测试用例</option>',
+    ...targets.map((item) => `<option value="${escapeHtml(item.value)}">${escapeHtml(item.label)}</option>`)
+  ].join("");
+  const preferredTarget = String(state.selectedTestCaseId || "");
+  if (targets.some((item) => item.value === currentTarget)) els.revisionTarget.value = currentTarget;
+  else if (targets.some((item) => item.value === preferredTarget)) els.revisionTarget.value = preferredTarget;
+  els.createRevision.disabled = targets.length === 0;
+  els.createRevision.title = targets.length ? "" : "先运行测试并显式设为基线";
+  selectRevision(state.selectedRevisionId);
+}
+
+function selectRevision(revisionId) {
+  state.selectedRevisionId = revisionId;
+  const revision = (state.data?.revisions || []).find((item) => item.id === revisionId);
+  els.revisionSelect.value = revisionId || "";
+  if (!revision) {
+    els.revisionState.textContent = "尚未创建";
+    els.revisionDiff.textContent = "尚未生成修改。";
+    els.applyRevision.disabled = true;
+    els.revertRevision.disabled = true;
+    els.runRevisionCandidate.disabled = true;
+    els.reviewRevision.disabled = true;
+    return;
+  }
+  const comparison = comparisonForRevision(revision);
+  const reviewed = Boolean(revision.reviewed_at && revision.comparison_id);
+  els.revisionState.textContent = `#${revision.id} · ${revisionStage(revision, comparison)}`;
+  els.revisionDiff.textContent = revision.diff || formatRevisionDiff(revision.before_json, revision.after_json);
+  els.runRevisionCandidate.disabled = Boolean(state.activeTestOperationId) || revision.status !== "draft" || !revision.test_case_id || !revision.baseline_run_id;
+  els.reviewRevision.disabled = revision.status !== "draft" || reviewed || !comparison?.result_json?.passed;
+  els.applyRevision.disabled = revision.status !== "draft" || !reviewed;
+  els.revertRevision.disabled = revision.status !== "applied";
+}
+
+async function createWorkbenchRevision() {
+  const testCase = (state.data?.testCases || []).find((item) => item.id === Number(els.revisionTarget.value));
+  const reason = els.revisionReason.value.trim();
+  if (!testCase || !reason) return setWorkbenchError("请选择证据用例并填写修改原因。");
+  if (!testCase.baseline_run_id) return setWorkbenchError("创建修订前，请先为证据用例设置成功基线。");
+  let after;
+  try {
+    after = parseJsonField(els.revisionAfterJson, {});
+    if (!after || Array.isArray(after) || typeof after !== "object") throw new Error("变更字段必须是 JSON 对象");
+  } catch (error) {
+    return setWorkbenchError(`修改 JSON 无效: ${error.message}`);
+  }
+  els.createRevision.disabled = true;
+  try {
+    const revision = await window.agentFirewall.createRevision(state.workspace, {
+      target_type: testCase.target_type,
+      target_ref: testCase.target_ref,
+      after,
+      reason,
+      test_case_id: testCase.id,
+      baseline_run_id: testCase.baseline_run_id
+    });
+    state.selectedRevisionId = revision.id;
+    await refreshWorkspaceData();
+    selectRevision(revision.id);
+  } catch (error) {
+    setWorkbenchError(error.message);
+  } finally {
+    els.createRevision.disabled = !(state.data?.testCases || []).some((item) => item.baseline_run_id);
+  }
+}
+
+async function applySelectedRevision() {
+  const revision = (state.data?.revisions || []).find((item) => item.id === state.selectedRevisionId);
+  if (!revision || revision.status !== "draft" || !revision.reviewed_at || !revision.comparison_id) return;
+  if (!window.confirm(`应用已通过回归比较并完成审核的修订 #${revision.id}？`)) return;
+  els.applyRevision.disabled = true;
+  try {
+    await window.agentFirewall.applyRevision(state.workspace, revision.id);
+    await refreshWorkspaceData();
+    selectRevision(revision.id);
+  } catch (error) {
+    setWorkbenchError(error.message);
+    selectRevision(revision.id);
+  }
+}
+
+async function reviewSelectedRevision() {
+  const revision = (state.data?.revisions || []).find((item) => item.id === state.selectedRevisionId);
+  const comparison = comparisonForRevision(revision);
+  if (!revision || revision.status !== "draft" || !comparison?.result_json?.passed) return;
+  els.reviewRevision.disabled = true;
+  try {
+    await window.agentFirewall.reviewRevision(state.workspace, revision.id, comparison.id);
+    await refreshWorkspaceData();
+    selectRevision(revision.id);
+  } catch (error) {
+    setWorkbenchError(error.message);
+    selectRevision(revision.id);
+  }
+}
+
+async function revertSelectedRevision() {
+  const revision = (state.data?.revisions || []).find((item) => item.id === state.selectedRevisionId);
+  if (!revision || revision.status !== "applied") return;
+  if (!window.confirm(`回滚修订 #${revision.id}，恢复应用前配置？`)) return;
+  els.revertRevision.disabled = true;
+  try {
+    await window.agentFirewall.revertRevision(state.workspace, revision.id);
+    await refreshWorkspaceData();
+    selectRevision(revision.id);
+  } catch (error) {
+    setWorkbenchError(error.message);
+    selectRevision(revision.id);
+  }
+}
+
+function formatRevisionDiff(before, after) {
+  const left = JSON.stringify(before || {}, null, 2).split("\n").map((line) => `-${line}`);
+  const right = JSON.stringify(after || {}, null, 2).split("\n").map((line) => `+${line}`);
+  return ["--- before", "+++ after", ...left, ...right].join("\n");
+}
+
+function translateRevisionStatus(status) {
+  return ({ draft: "待审核", applied: "已应用", reverted: "已回滚" })[status] || status;
+}
+
+function comparisonForRevision(revision) {
+  if (!revision) return null;
+  const comparisons = state.data?.comparisons || [];
+  if (revision.comparison_id) return comparisons.find((item) => item.id === revision.comparison_id) || null;
+  return comparisons.find((item) => item.revision_id === revision.id && item.candidate_run_id === revision.candidate_run_id) || null;
+}
+
+function revisionStage(revision, comparison) {
+  if (revision.status !== "draft") return translateRevisionStatus(revision.status);
+  if (revision.reviewed_at && revision.comparison_id) return "已审核 · 待应用";
+  if (comparison?.result_json?.passed) return "比较通过 · 待审核";
+  if (comparison) return "比较未通过";
+  if (revision.candidate_run_id) return "候选已运行 · 待比较";
+  return "待运行候选";
+}
+
 function renderCapabilityList(items) {
   if (!els.capabilityList) return;
-  els.capabilityList.innerHTML = items.length ? items.map((item) => `
-    <article class="capability-item">
-      <div class="capability-kind">${escapeHtml(translateCapabilityKind(item.kind))}</div>
-      <div><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.ref || "")}</small></div>
-      <span class="status-label ${item.health === "available" ? "success" : item.health === "issue" ? "danger" : "neutral"}">
-        ${item.health === "available" ? "可用" : item.health === "issue" ? "有问题" : "未检查"}
-      </span>
-      <code>${item.executable ? "可执行" : "绑定资源"}</code>
-    </article>
-  `).join("") : '<div class="empty-state wide"><strong>没有发现能力</strong></div>';
+  const visible = items.filter((item) => {
+    const kindMatches = !state.capabilityKind || item.kind === state.capabilityKind || (
+      state.capabilityKind === "skill" && item.kind === "script_action"
+    );
+    const queryMatches = !state.capabilityQuery || [item.name, item.description, item.ref, item.kind]
+      .some((value) => String(value || "").toLowerCase().includes(state.capabilityQuery));
+    return kindMatches && queryMatches;
+  });
+  els.capabilityList.innerHTML = visible.length ? visible.map((item) => {
+    const discovery = state.mcpDiscoveryStatus[item.id];
+    const healthClass = discovery?.status === "error" ? "danger" : discovery?.status === "running" ? "warning" : item.health === "available" ? "success" : item.health === "issue" ? "danger" : "neutral";
+    const healthText = discovery?.status === "error" ? "发现失败" : discovery?.status === "running" ? "发现中" : discovery?.count != null ? `已发现 ${discovery.count}` : item.health === "available" ? "可用" : item.health === "issue" ? "有问题" : "未检查";
+    return `
+      <article class="capability-item" ${discovery?.message ? `title="${escapeHtml(discovery.message)}"` : ""}>
+        <div class="capability-kind">${escapeHtml(translateCapabilityKind(item.kind))}</div>
+        <div><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.description || item.ref || "")}</small></div>
+        <span class="status-label ${healthClass}">${escapeHtml(healthText)}</span>
+        <code>${item.kind === "agent" && Object.keys(item.allowed_mcp_tools || {}).length ? `允许 ${Object.values(item.allowed_mcp_tools).flat().length} 个 MCP Tool` : item.executable ? "可执行" : item.kind === "mcp_server" ? "连接容器" : "绑定资源"}</code>
+        <div class="capability-actions">
+          ${item.kind === "mcp_server" ? `<button data-discover-mcp="${escapeHtml(item.id)}" type="button" ${discovery?.status === "running" ? "disabled" : ""}>发现工具</button>` : ""}
+        </div>
+      </article>
+    `;
+  }).join("") : '<div class="empty-state wide"><strong>没有发现能力</strong></div>';
+  els.capabilityList.querySelectorAll("[data-discover-mcp]").forEach((button) => {
+    button.addEventListener("click", () => discoverMcpServer(button.dataset.discoverMcp));
+  });
+}
+
+async function discoverMcpServer(capabilityId) {
+  const server = (state.data?.capabilities || []).find((item) => item.id === capabilityId && item.kind === "mcp_server");
+  if (!server) return;
+  const approvals = state.data?.config?.policy?.require_approval || [];
+  const requiresApproval = approvals.includes("mcp:*") || approvals.includes("mcp:connect");
+  if (requiresApproval && !window.confirm(`批准本次连接并发现 MCP Server “${server.name}” 的工具？`)) return;
+  state.mcpDiscoveryStatus[capabilityId] = { status: "running" };
+  renderCapabilityList(state.data.capabilities || []);
+  try {
+    const tools = await window.agentFirewall.discoverMcpTools(
+      state.workspace, server.agent, server.ref, requiresApproval
+    );
+    state.mcpDiscoveryStatus[capabilityId] = { status: "success", count: tools.length };
+    await refreshWorkspaceData();
+  } catch (error) {
+    state.mcpDiscoveryStatus[capabilityId] = { status: "error", message: error.message };
+    renderCapabilityList(state.data.capabilities || []);
+  }
 }
 
 function renderTestCaseList(cases) {
   if (!els.testCaseList) return;
   if (!cases.length) {
-    els.testCaseList.innerHTML = '<button class="test-case-item active" type="button"><span class="status-dot idle"></span><span><strong>新测试用例</strong><small>尚未保存</small></span></button>';
+    els.testCaseList.innerHTML = '<button class="test-case-item active" data-new-test-case type="button"><span class="status-dot idle"></span><span><strong>新测试用例</strong><small>尚未保存</small></span></button>';
+    els.testCaseList.querySelector("[data-new-test-case]")?.addEventListener("click", () => newWorkbenchCase());
     return;
   }
   els.testCaseList.innerHTML = cases.map((item) => `
     <button class="test-case-item ${item.id === state.selectedTestCaseId ? "active" : ""}" data-test-id="${item.id}" type="button">
-      <span class="status-dot idle"></span><span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.target_type)}</small></span>
+      <span class="status-dot ${item.baseline_run_id ? "success" : "idle"}"></span><span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(translateCapabilityKind(item.target_type))} · ${item.baseline_run_id ? "有基线" : "未设基线"}</small></span>
     </button>
   `).join("");
   els.testCaseList.querySelectorAll("[data-test-id]").forEach((button) => button.addEventListener("click", () => selectTestCase(Number(button.dataset.testId))));
 }
 
-function selectTestCase(id) {
+function newWorkbenchCase() {
+  if (state.activeTestOperationId) return;
+  state.selectedTestCaseId = null;
+  state.lastTestResult = null;
+  els.testNameInput.value = "";
+  els.testTargetSelect.value = "";
+  els.testGoalInput.value = "";
+  els.testInputJson.value = "{}";
+  els.testAssertionsJson.value = "[]";
+  renderTestCaseList(state.data?.testCases || []);
+  renderBaselineState();
+}
+
+function selectTestCase(id, { preserveRun = false } = {}) {
   const item = (state.data.testCases || []).find((test) => test.id === id);
   if (!item) return;
   state.selectedTestCaseId = id;
+  if (!preserveRun) state.lastTestResult = null;
   els.testNameInput.value = item.name;
   els.testGoalInput.value = item.goal;
-  const capability = (state.data.capabilities || []).find((candidate) => candidate.kind === item.target_type && candidate.ref === item.target_ref);
+  const capability = (state.data.capabilities || []).find((candidate) => {
+    if (candidate.kind !== item.target_type || candidate.ref !== item.target_ref) return false;
+    if (item.target_type === "mcp_tool") {
+      return candidate.name === item.input_json?.tool && (!item.input_json?.agent || candidate.agent === item.input_json.agent);
+    }
+    if (item.target_type === "script_action") return candidate.script === item.input_json?.script;
+    if (item.target_type === "skill_binding") return candidate.agent === item.input_json?.agent;
+    return true;
+  });
   els.testTargetSelect.value = capability?.id || "";
   els.testInputJson.value = JSON.stringify(item.input_json || {}, null, 2);
   els.testAssertionsJson.value = JSON.stringify(item.assertions_json || [], null, 2);
+  if ([...els.revisionTarget.options].some((option) => option.value === String(id))) {
+    els.revisionTarget.value = String(id);
+  }
   renderTestCaseList(state.data.testCases || []);
+  renderBaselineState();
 }
 
 function applyTargetDefaults() {
@@ -1187,7 +1586,14 @@ function applyTargetDefaults() {
   if (!capability) return;
   const current = parseJsonField(els.testInputJson, {});
   if (capability.kind === "script_action") current.script = capability.script;
-  if (capability.kind === "mcp_tool") Object.assign(current, { server: capability.ref, tool: capability.name, args: current.args || {} });
+  if (capability.kind === "skill_binding") current.agent = capability.agent;
+  if (capability.kind === "mcp_tool") Object.assign(current, {
+    agent: capability.agent,
+    server: capability.ref,
+    tool: capability.name,
+    input_schema: capability.input_schema || {},
+    args: current.args || {}
+  });
   els.testInputJson.value = JSON.stringify(current, null, 2);
 }
 
@@ -1198,6 +1604,9 @@ function selectedCapability() {
 async function saveWorkbenchCase() {
   const capability = selectedCapability();
   if (!capability) return setWorkbenchError("请选择可执行目标能力。");
+  if (capability.health === "issue") {
+    return setWorkbenchError(`目标能力不可用：${capability.health_issue || "健康检查失败"}`);
+  }
   let input;
   let assertions;
   try {
@@ -1221,50 +1630,389 @@ async function saveWorkbenchCase() {
   if (index >= 0) state.data.testCases[index] = saved;
   else state.data.testCases.unshift(saved);
   renderTestCaseList(state.data.testCases);
+  setWorkbenchStatus("success", "测试用例已保存");
   return saved;
 }
 
-async function executeWorkbenchCase(baselineRunId = "", approved = false) {
+async function executeWorkbenchCase(approved = false, revisionId = null) {
+  if (state.activeTestOperationId) return;
+  const operationId = crypto.randomUUID();
   try {
-    const saved = await saveWorkbenchCase();
+    const revision = (state.data?.revisions || []).find((item) => item.id === revisionId);
+    const saved = revision
+      ? (state.data?.testCases || []).find((item) => item.id === revision.test_case_id)
+      : await saveWorkbenchCase();
     if (!saved) return;
-    els.runTestCase.disabled = true;
-    els.traceList.innerHTML = '<div class="empty-state"><strong>正在运行...</strong></div>';
-    const result = await window.agentFirewall.runTestCase(state.workspace, saved.id, baselineRunId, approved);
-    if (!state.baselineRunId && result.status === "success") state.baselineRunId = result.run_id;
-    renderTestResult(result);
-    const refreshed = await window.agentFirewall.loadWorkspace(state.workspace);
-    setWorkspaceData(refreshed);
+    if (revision) {
+      state.selectedTestCaseId = saved.id;
+      selectTestCase(saved.id, { preserveRun: true });
+      state.selectedRevisionId = revision.id;
+    }
+    const baselineRunId = revision?.baseline_run_id || saved.baseline_run_id || "";
+    state.activeTestOperationId = operationId;
+    state.testStartedAt = Date.now();
+    startTestRunPolling(operationId);
+    setWorkbenchRunning(true);
+    const result = await window.agentFirewall.runTestCase(
+      state.workspace,
+      saved.id,
+      baselineRunId,
+      approved,
+      operationId,
+      revision?.id || ""
+    );
+    if (result.status === "cancelled") {
+      try {
+        const cancelledRun = await window.agentFirewall.getRunDetails(state.workspace, operationId);
+        result.run_id = operationId;
+        result.test_case_id = saved.id;
+        result.events = cancelledRun.events || [];
+      } catch {
+        result.run_id = operationId;
+        result.test_case_id = saved.id;
+      }
+    }
+    result.durationMs = Date.now() - state.testStartedAt;
+    if (result.status !== "cancelled" && baselineRunId && result.run_id && result.run_id !== baselineRunId) {
+      try {
+        result.comparison = await window.agentFirewall.compareRuns(state.workspace, baselineRunId, result.run_id);
+      } catch (error) {
+        result.comparisonError = error.message;
+      }
+    }
+    state.lastTestResult = result;
+    state.pendingRevisionId = result.status === "needs_input" ? revision?.id || null : null;
     state.selectedTestCaseId = saved.id;
+    await refreshWorkspaceData();
     renderTestResult(result);
-    els.rerunTestCase.disabled = false;
   } catch (error) {
     setWorkbenchError(error.message);
   } finally {
-    els.runTestCase.disabled = false;
+    stopTestRunPolling();
+    if (state.activeTestOperationId === operationId) state.activeTestOperationId = null;
+    setWorkbenchRunning(false);
   }
 }
 
 function renderTestResult(result) {
-  els.traceList.innerHTML = (result.events || []).map((event) => `
+  const events = result.events || [];
+  renderTraceEvents(events, result.status === "cancelled");
+  if (result.status === "cancelled") {
+    els.diagnosisPanel.innerHTML = '<div class="section-title"><span>运行状态</span><span class="status-label warning">已取消</span></div><p>本地后端进程已终止，取消终态和事件已写入运行记录。</p>';
+  } else if (result.diagnosis) {
+    const statusClass = result.status === "needs_input" ? "warning" : "danger";
+    els.diagnosisPanel.innerHTML = `<div class="section-title"><span>失败定位</span><span class="status-label ${statusClass}">${escapeHtml(result.diagnosis.layer)}</span></div><p>${escapeHtml(result.diagnosis.message)}</p>`;
+  } else {
+    const comparison = result.comparison?.result_json;
+    const comparisonText = result.comparisonError
+      ? `运行通过，但基线比较未保存：${result.comparisonError}`
+      : comparison ? (comparison.passed ? "候选通过基线比较。" : `检测到回归：${comparison.regressions.join("；") || "候选未通过"}`) : "全部断言通过，可显式设为基线。";
+    const comparisonClass = result.comparisonError ? "warning" : comparison && !comparison.passed ? "danger" : "success";
+    const comparisonLabel = result.comparisonError ? "比较失败" : comparison ? (comparison.passed ? "比较通过" : "检测到回归") : "通过";
+    els.diagnosisPanel.innerHTML = `<div class="section-title"><span>验收结果</span><span class="status-label ${comparisonClass}">${comparisonLabel}</span></div><p>${escapeHtml(comparisonText)}</p>`;
+  }
+  renderAssertionEvidence(result.assertions);
+  els.traceEventCount.textContent = `${events.length} 个事件`;
+  els.traceDuration.textContent = `耗时 ${formatDuration(result.durationMs)}`;
+  els.traceStatus.textContent = translateStatus(result.status);
+  els.traceStatus.className = `status-label ${statusClass(result.status)}`;
+  setWorkbenchStatus(result.status, translateStatus(result.status));
+  els.approveOperation.disabled = result.status !== "needs_input";
+  els.rerunTestCase.disabled = result.status === "cancelled" || !state.selectedTestCaseId;
+  renderBaselineState();
+}
+
+function renderTraceEvents(events, cancelled = false) {
+  if (!events.length) {
+    els.traceList.innerHTML = cancelled
+      ? '<div class="empty-state"><strong>运行已取消</strong><p>取消终态已写入本地运行记录。</p></div>'
+      : '<div class="empty-state"><strong>等待首个事件</strong></div>';
+    return;
+  }
+  els.traceList.innerHTML = events.map((event) => `
     <article class="trace-event">
-      <span class="status-dot ${event.event_type === "run_finished" && event.payload.status === "failed" ? "danger" : "success"}"></span>
+      <span class="status-dot ${event.event_type === "run_finished" && ["failed", "cancelled"].includes(event.payload?.status) ? "danger" : "success"}"></span>
       <div><strong>${escapeHtml(event.event_type)}</strong><small>${escapeHtml(event.node_id || "run")}</small><pre>${escapeHtml(JSON.stringify(event.payload, null, 2))}</pre></div>
     </article>
   `).join("");
-  if (result.diagnosis) {
-    els.diagnosisPanel.innerHTML = `<div class="section-title"><span>失败定位</span><span class="status-label danger">${escapeHtml(result.diagnosis.layer)}</span></div><p>${escapeHtml(result.diagnosis.message)}</p>`;
-  } else {
-    els.diagnosisPanel.innerHTML = '<div class="section-title"><span>验收结果</span><span class="status-label success">通过</span></div><p>全部断言通过，可保存为基线或继续回归。</p>';
+  els.traceList.scrollTop = els.traceList.scrollHeight;
+}
+
+function startTestRunPolling(runId) {
+  stopTestRunPolling();
+  const workspace = state.workspace;
+  const poll = async () => {
+    if (state.testPollBusy || state.activeTestOperationId !== runId || state.workspace !== workspace) return;
+    state.testPollBusy = true;
+    try {
+      const run = await window.agentFirewall.getRunDetails(workspace, runId);
+      if (state.activeTestOperationId !== runId || state.workspace !== workspace) return;
+      renderLiveTestRun(run);
+    } catch {
+      // The run row may not exist during the first process startup tick.
+    } finally {
+      state.testPollBusy = false;
+    }
+  };
+  state.testPollTimer = window.setInterval(poll, 600);
+  poll();
+}
+
+function stopTestRunPolling() {
+  if (state.testPollTimer) window.clearInterval(state.testPollTimer);
+  state.testPollTimer = null;
+  state.testPollBusy = false;
+}
+
+function renderLiveTestRun(run) {
+  const events = run?.events || [];
+  renderTraceEvents(events);
+  els.traceEventCount.textContent = `${events.length} 个事件`;
+  els.traceDuration.textContent = `耗时 ${formatDuration(Date.now() - new Date(run.started_at).getTime())}`;
+  els.traceStatus.textContent = translateStatus(run.status);
+  els.traceStatus.className = `status-label ${statusClass(run.status)}`;
+  setWorkbenchStatus(run.status, `${translateStatus(run.status)} · ${events.length} 个事件`);
+  const assertions = [...events].reverse().find((event) => event.event_type === "assertions_evaluated");
+  if (assertions) renderAssertionEvidence(assertions.payload);
+  const diagnosis = [...events].reverse().find((event) => event.event_type === "diagnosis_created");
+  if (diagnosis) {
+    els.diagnosisPanel.innerHTML = `<div class="section-title"><span>失败定位</span><span class="status-label danger">${escapeHtml(diagnosis.payload.layer)}</span></div><p>${escapeHtml(diagnosis.payload.message)}</p>`;
   }
-  els.approveOperation.disabled = result.status !== "needs_input";
+}
+
+function startFlowRunPolling(runId) {
+  stopFlowRunPolling();
+  const poll = async () => {
+    if (state.flowPollBusy || state.activeFlowOperationId !== runId) return;
+    state.flowPollBusy = true;
+    try {
+      const run = await window.agentFirewall.getRunDetails(state.workspace, runId);
+      state.lastRun = run;
+      const events = (run.events || [])
+        .filter((event) => ["node_started", "node_finished", "node_retrying", "run_paused", "run_resumed"].includes(event.event_type))
+        .map(formatRunEvent);
+      els.runStatus.textContent = translateStatus(run.status);
+      els.runOutput.textContent = [`运行: ${run.run_id}`, ...events, run.final_summary || ""].filter(Boolean).join("\n");
+    } catch {
+      // The run row may not exist during the first process startup tick.
+    } finally {
+      state.flowPollBusy = false;
+    }
+  };
+  state.flowPollTimer = window.setInterval(poll, 600);
+  poll();
+}
+
+function stopFlowRunPolling() {
+  if (state.flowPollTimer) window.clearInterval(state.flowPollTimer);
+  state.flowPollTimer = null;
+  state.flowPollBusy = false;
+}
+
+function renderAssertionEvidence(assertions) {
+  if (!els.evidenceSection) return;
+  const results = assertions?.results || [];
+  els.evidenceSection.innerHTML = `
+    <div class="section-title"><span>断言证据</span><small>${results.length} 项</small></div>
+    ${results.length ? results.map((item) => `<div class="empty-inline">${item.passed ? "通过" : "失败"} · ${escapeHtml(item.message || item.kind || "断言")}</div>`).join("") : '<div class="empty-inline">本次运行没有断言结果。</div>'}
+  `;
+}
+
+function currentTestCase() {
+  return (state.data?.testCases || []).find((item) => item.id === state.selectedTestCaseId) || null;
+}
+
+function renderBaselineState() {
+  const testCase = currentTestCase();
+  const baselineRunId = testCase?.baseline_run_id || "";
+  els.baselineStatus.textContent = baselineRunId ? "基线已设置" : "未设置基线";
+  els.baselineRunId.textContent = baselineRunId || "--";
+  els.baselineRunId.title = baselineRunId;
+  const result = state.lastTestResult;
+  const canSet = result?.status === "success" && !result.revision_id && result.test_case_id === testCase?.id && result.run_id !== baselineRunId;
+  els.setBaseline.disabled = state.activeTestOperationId || !canSet;
+  els.runTestCase.textContent = baselineRunId ? "▶ 运行候选并比较" : "▶ 运行测试";
+}
+
+function setWorkbenchRunning(running) {
+  els.runTestCase.disabled = running;
+  els.saveTestCase.disabled = running;
+  const canAbandon = !running && ["needs_input", "blocked"].includes(state.lastTestResult?.status) && Boolean(state.lastTestResult?.run_id);
+  els.cancelTestRun.disabled = !running && !canAbandon;
+  els.cancelTestRun.textContent = canAbandon ? "放弃本次运行" : "取消测试";
+  els.runRevisionCandidate.disabled = running;
+  els.reviewRevision.disabled = running;
+  els.applyRevision.disabled = running;
+  if (running) {
+    els.approveOperation.disabled = true;
+    els.rerunTestCase.disabled = true;
+    els.setBaseline.disabled = true;
+    els.traceList.innerHTML = '<div class="empty-state"><strong>本地后端进程运行中</strong><p>正在从 SQLite 增量载入执行事件。</p></div>';
+    els.traceStatus.textContent = "运行中";
+    els.traceStatus.className = "status-label warning";
+    els.traceEventCount.textContent = "0 个事件";
+    els.traceDuration.textContent = "耗时 --";
+    setWorkbenchStatus("running", "运行中 · 事件实时载入");
+  }
+  renderBaselineState();
+  if (!running) selectRevision(state.selectedRevisionId);
+}
+
+function setWorkbenchStatus(status, text) {
+  const dotClass = status === "success" ? "success" : ["failed", "error"].includes(status) ? "danger" : "idle";
+  els.workbenchStatusDot.className = `status-dot ${dotClass}`;
+  els.workbenchStatusText.textContent = text;
+}
+
+async function cancelActiveTestRun() {
+  const operationId = state.activeTestOperationId || state.lastTestResult?.run_id;
+  if (!operationId) return;
+  els.cancelTestRun.disabled = true;
+  setWorkbenchStatus("running", "正在停止本地进程");
+  try {
+    await window.agentFirewall.cancelOperation(state.workspace, operationId);
+    if (!state.activeTestOperationId) {
+      const run = await window.agentFirewall.getRunDetails(state.workspace, operationId);
+      state.lastTestResult = { ...run, test_case_id: state.selectedTestCaseId, durationMs: Date.now() - new Date(run.started_at).getTime() };
+      renderTestResult(state.lastTestResult);
+      await refreshWorkspaceData();
+      setWorkbenchRunning(false);
+    }
+  } catch (error) {
+    setWorkbenchError(`停止运行失败: ${error.message}`);
+  }
+}
+
+async function cancelActiveFlowRun() {
+  const operationId = state.activeFlowOperationId;
+  if (!operationId) return;
+  els.cancelFlow.disabled = true;
+  els.runStatus.textContent = "正在停止";
+  try {
+    const signalled = await window.agentFirewall.cancelOperation(state.workspace, operationId);
+    if (!signalled) els.runOutput.textContent = "运行已经结束，未找到可停止的本地进程。";
+  } catch (error) {
+    els.runStatus.textContent = "停止失败";
+    els.runOutput.textContent = error.message;
+  }
+}
+
+async function setCurrentRunAsBaseline() {
+  const result = state.lastTestResult;
+  if (!result?.run_id || result.status !== "success") return;
+  await setRunAsBaseline(result.test_case_id, result.run_id);
+}
+
+async function setRunAsBaseline(testCaseId, runId) {
+  const testCase = (state.data?.testCases || []).find((item) => item.id === testCaseId);
+  const run = (state.data?.runs || []).find((item) => item.run_id === runId);
+  if (!testCase || run?.status !== "success" || run.revision_id) return setWorkbenchError("只有非修订候选的成功测试运行可以设为基线。");
+  if (testCase.baseline_run_id && testCase.baseline_run_id !== runId && !window.confirm("替换该测试用例当前基线？")) return;
+  els.setBaseline.disabled = true;
+  try {
+    await window.agentFirewall.setTestBaseline(state.workspace, testCaseId, runId);
+    state.selectedTestCaseId = testCaseId;
+    await refreshWorkspaceData();
+    setWorkbenchStatus("success", "基线已保存");
+  } catch (error) {
+    setWorkbenchError(error.message);
+    renderBaselineState();
+  }
 }
 
 function renderRunHistory(runs) {
   if (!els.runHistoryList) return;
-  els.runHistoryList.innerHTML = runs.length ? runs.map((run) => `
-    <article class="run-history-row"><code>${escapeHtml(run.run_id.slice(0, 8))}</code><span>${escapeHtml(run.goal)}</span><span class="status-label ${run.status === "success" ? "success" : "danger"}">${escapeHtml(translateStatus(run.status))}</span><span>--</span><time>${escapeHtml(run.started_at)}</time></article>
-  `).join("") : '<div class="empty-state wide"><strong>暂无运行记录</strong></div>';
+  const filtered = state.runStatusFilter ? runs.filter((run) => run.status === state.runStatusFilter) : runs;
+  const comparisons = state.data?.comparisons || [];
+  els.runHistoryList.innerHTML = filtered.length ? filtered.map((run) => {
+    const testCaseId = testCaseIdForRun(run);
+    const testCase = (state.data?.testCases || []).find((item) => item.id === testCaseId);
+    const snapshotCase = run.flow_snapshot?.test_case || {};
+    const isTest = run.run_kind === "test_case" || Boolean(testCaseId);
+    const isBaseline = Boolean(run.is_baseline || (testCase?.baseline_run_id && testCase.baseline_run_id === run.run_id));
+    const isCandidate = Boolean(run.parent_run_id || run.revision_id);
+    const comparison = comparisons.find((item) => item.candidate_run_id === run.run_id);
+    const comparisonText = comparison ? (comparison.result_json?.passed ? "比较通过" : "检测到回归") : isBaseline ? "基线" : isCandidate ? "候选 · 待比较" : "未比较";
+    const targetName = isTest ? (testCase?.name || snapshotCase.name || `测试用例 #${testCaseId}`) : (run.flow_name || "default");
+    const targetRef = isTest ? `${translateCapabilityKind(testCase?.target_type || snapshotCase.target_type)} · ${testCase?.target_ref || snapshotCase.target_ref || "--"}` : run.goal;
+    return `
+      <article class="run-history-row">
+        <div class="run-context"><span class="run-type-badge ${isTest ? "test" : ""}">${isTest ? "TEST CASE" : "FLOW"}</span><code>${escapeHtml(run.run_id.slice(0, 8))}</code><span>${run.revision_id ? `修订 #${run.revision_id}` : isBaseline ? "基线" : isCandidate ? "候选" : ""}</span></div>
+        <div class="run-target"><strong>${escapeHtml(targetName)}</strong><small>${escapeHtml(targetRef)}</small></div>
+        <div class="run-comparison"><span class="status-label ${statusClass(run.status)}">${escapeHtml(translateStatus(run.status))}</span><small>${escapeHtml(comparisonText)}</small></div>
+        <span>${formatRunDuration(run)}</span>
+        <time title="${escapeHtml(run.started_at || "")}">${escapeHtml(formatDateTime(run.started_at))}</time>
+        <div class="run-row-actions">
+          ${isTest ? `<button data-open-test="${testCaseId}" data-run-id="${escapeHtml(run.run_id)}" type="button">查看</button>` : ""}
+          ${isTest && run.status === "success" && !isBaseline && !run.revision_id ? `<button data-set-baseline="${testCaseId}" data-run-id="${escapeHtml(run.run_id)}" type="button">设为基线</button>` : ""}
+        </div>
+      </article>
+    `;
+  }).join("") : '<div class="empty-state wide"><strong>暂无匹配的运行记录</strong></div>';
+  els.runHistoryList.querySelectorAll("[data-open-test]").forEach((button) => {
+    button.addEventListener("click", () => openTestRun(Number(button.dataset.openTest), button.dataset.runId));
+  });
+  els.runHistoryList.querySelectorAll("[data-set-baseline]").forEach((button) => {
+    button.addEventListener("click", () => setRunAsBaseline(Number(button.dataset.setBaseline), button.dataset.runId));
+  });
+}
+
+async function openTestRun(testCaseId, runId) {
+  selectTestCase(testCaseId);
+  setActiveView("workbench");
+  try {
+    const run = await window.agentFirewall.getRunDetails(state.workspace, runId);
+    if (state.selectedTestCaseId !== testCaseId) return;
+    const events = run.events || [];
+    const assertions = [...events].reverse().find((event) => event.event_type === "assertions_evaluated")?.payload;
+    const diagnosis = [...events].reverse().find((event) => event.event_type === "diagnosis_created")?.payload;
+    state.lastTestResult = {
+      ...run,
+      test_case_id: testCaseId,
+      assertions,
+      diagnosis,
+      durationMs: run.finished_at ? new Date(run.finished_at).getTime() - new Date(run.started_at).getTime() : 0
+    };
+    renderTestResult(state.lastTestResult);
+  } catch (error) {
+    setWorkbenchError(error.message);
+  }
+}
+
+function testCaseIdForRun(run) {
+  if (run.test_case_id) return Number(run.test_case_id);
+  if (String(run.flow_name || "").startsWith("test:")) return Number(String(run.flow_name).slice(5)) || null;
+  return Number(run.flow_snapshot?.test_case?.id) || null;
+}
+
+function formatRunDuration(run) {
+  if (!run.started_at || !run.finished_at) return "--";
+  return formatDuration(new Date(run.finished_at).getTime() - new Date(run.started_at).getTime());
+}
+
+function formatDuration(milliseconds) {
+  if (!Number.isFinite(milliseconds) || milliseconds < 0) return "--";
+  if (milliseconds < 1000) return `${Math.round(milliseconds)} ms`;
+  return `${(milliseconds / 1000).toFixed(milliseconds < 10000 ? 1 : 0)} s`;
+}
+
+function formatDateTime(value) {
+  if (!value) return "--";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("zh-CN", { hour12: false });
+}
+
+function statusClass(status) {
+  if (status === "success") return "success";
+  if (["running", "needs_input", "blocked", "cancelled"].includes(status)) return "warning";
+  if (["failed", "error", "timeout"].includes(status)) return "danger";
+  return "neutral";
+}
+
+async function refreshWorkspaceData() {
+  const refreshed = await window.agentFirewall.loadWorkspace(state.workspace);
+  setWorkspaceData(refreshed);
+  return refreshed;
 }
 
 function parseJsonField(element, fallback) {
@@ -1274,11 +2022,16 @@ function parseJsonField(element, fallback) {
 
 function setWorkbenchError(message) {
   if (els.diagnosisPanel) els.diagnosisPanel.innerHTML = `<div class="section-title"><span>配置错误</span><span class="status-label danger">阻塞</span></div><p>${escapeHtml(message)}</p>`;
+  if (els.traceStatus) {
+    els.traceStatus.textContent = "错误";
+    els.traceStatus.className = "status-label danger";
+  }
+  if (els.workbenchStatusText) setWorkbenchStatus("error", "操作失败");
   return null;
 }
 
 function translateCapabilityKind(kind) {
-  return ({ agent: "Agent", skill: "Skill Binding", script_action: "Script Action", mcp_server: "MCP Server", mcp_tool: "MCP Tool" })[kind] || kind;
+  return ({ agent: "Agent", skill: "Skill", skill_binding: "Skill Binding", script_action: "Script Action", mcp_server: "MCP Server", mcp_tool: "MCP Tool" })[kind] || kind;
 }
 
 function formatRunResult(result) {
@@ -1334,7 +2087,9 @@ function translateStatus(status) {
     blocked: "已阻塞",
     always: "始终",
     error: "错误",
-    timeout: "超时"
+    timeout: "超时",
+    running: "运行中",
+    cancelled: "已取消"
   };
   return map[status] || status || "未知";
 }

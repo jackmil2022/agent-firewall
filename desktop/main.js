@@ -7,11 +7,15 @@ const {
   saveAndStartFlow,
   resumeFlow,
   saveTestCase,
+  setTestBaseline,
   runTestCase,
+  cancelOperation,
   preflightFlow,
   discoverMcpTools,
   compareRuns,
+  getRunDetails,
   createRevision,
+  reviewRevision,
   applyRevision,
   revertRevision
 } = require("./workspace");
@@ -35,10 +39,12 @@ function createWindow() {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
+      sandbox: true
     }
   });
 
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  mainWindow.webContents.on("will-navigate", (event) => event.preventDefault());
   mainWindow.loadFile(path.join(__dirname, "renderer", "index.html"));
   mainWindow.once("ready-to-show", () => mainWindow.show());
 }
@@ -84,16 +90,31 @@ function registerIpc() {
 
   ipcMain.handle("test-case:save", async (_event, payload) =>
     saveTestCase(path.resolve(payload.workspace), payload.testCase));
+  ipcMain.handle("test-case:baseline-set", async (_event, payload) =>
+    setTestBaseline(path.resolve(payload.workspace), payload.testCaseId, payload.runId));
   ipcMain.handle("test-case:run", async (_event, payload) =>
-    runTestCase(path.resolve(payload.workspace), payload.testCaseId, payload.baselineRunId, payload.approved));
+    runTestCase(
+      path.resolve(payload.workspace),
+      payload.testCaseId,
+      payload.baselineRunId,
+      payload.approved,
+      payload.operationId,
+      payload.revisionId
+    ));
+  ipcMain.handle("operation:cancel", async (_event, payload) =>
+    cancelOperation(path.resolve(payload.workspace), payload.operationId));
   ipcMain.handle("flow:preflight", async (_event, payload) =>
     preflightFlow(path.resolve(payload.workspace), payload.flow));
   ipcMain.handle("mcp:discover", async (_event, payload) =>
-    discoverMcpTools(path.resolve(payload.workspace), payload.agent, payload.server));
+    discoverMcpTools(path.resolve(payload.workspace), payload.agent, payload.server, payload.approved));
   ipcMain.handle("run:compare", async (_event, payload) =>
     compareRuns(path.resolve(payload.workspace), payload.baseline, payload.candidate));
+  ipcMain.handle("run:details", async (_event, payload) =>
+    getRunDetails(path.resolve(payload.workspace), payload.runId));
   ipcMain.handle("revision:create", async (_event, payload) =>
     createRevision(path.resolve(payload.workspace), payload.revision));
+  ipcMain.handle("revision:review", async (_event, payload) =>
+    reviewRevision(path.resolve(payload.workspace), payload.revisionId, payload.comparisonId));
   ipcMain.handle("revision:apply", async (_event, payload) =>
     applyRevision(path.resolve(payload.workspace), payload.revisionId));
   ipcMain.handle("revision:revert", async (_event, payload) =>
@@ -101,12 +122,12 @@ function registerIpc() {
 
   ipcMain.handle("flow:start", async (_event, payload) => {
     const workspace = path.resolve(payload.workspace);
-    return saveAndStartFlow(workspace, payload.flow);
+    return saveAndStartFlow(workspace, payload.flow, payload.operationId);
   });
 
   ipcMain.handle("flow:resume", async (_event, payload) => {
     const workspace = path.resolve(payload.workspace);
-    return resumeFlow(workspace, payload.runId, payload.correction);
+    return resumeFlow(workspace, payload.runId, payload.correction, payload.operationId);
   });
 }
 

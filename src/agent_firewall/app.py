@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import runpy
 import sys
 from pathlib import Path
 
@@ -13,10 +14,10 @@ from .config import APP_DIR, AgentFirewallConfig, ConfigError, load_config, load
 from .engine import EngineError, build_agent_sync
 from .flow import FlowError, load_flow, preflight_flow, save_flow
 from .runner import RunnerError, resume_flow, run_flow
-from .revisions import apply_revision, create_revision, revert_revision
+from .revisions import apply_revision, create_revision, review_revision, revert_revision
 from .skills import install_bundled_skills, list_skill_manifests
 from .store import AgentFirewallStore
-from .workbench import compare_test_runs, run_test_case
+from .workbench import compare_test_runs, run_test_case, save_test_case, set_test_run_baseline
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -44,6 +45,7 @@ def main(argv: list[str] | None = None) -> int:
     run_parser.add_argument("--goal", default="Run the configured Agent Firewall flow.")
     run_parser.add_argument("--flow-name", default="default")
     run_parser.add_argument("--flow-path", help="Read a flow JSON file instead of sqlite.")
+    run_parser.add_argument("--run-id", help="Use a caller-provided run id for polling and cancellation.")
 
     resume_parser = subparsers.add_parser("resume", help="Resume a paused flow run.")
     resume_parser.add_argument("--run-id", required=True)
@@ -67,22 +69,37 @@ def main(argv: list[str] | None = None) -> int:
     test_case_run_parser = subparsers.add_parser("test-case-run", help="Run a saved workbench test case.")
     test_case_run_parser.add_argument("--id", type=int, required=True)
     test_case_run_parser.add_argument("--baseline-run-id")
+    test_case_run_parser.add_argument("--revision-id", type=int)
+    test_case_run_parser.add_argument("--run-id")
     test_case_run_parser.add_argument("--approved", action="store_true")
+    baseline_parser = subparsers.add_parser("test-case-baseline-set", help="Set a successful run as the current baseline.")
+    baseline_parser.add_argument("--id", type=int, required=True)
+    baseline_parser.add_argument("--run-id", required=True)
     subparsers.add_parser("workbench-json", help="Print capability, case, run, revision, and comparison state.")
+    run_json_parser = subparsers.add_parser("run-json", help="Print one run and its persisted events.")
+    run_json_parser.add_argument("--run-id", required=True)
+    run_cancel_parser = subparsers.add_parser("run-cancel", help="Finalize an active run as cancelled.")
+    run_cancel_parser.add_argument("--run-id", required=True)
     preflight_parser = subparsers.add_parser("flow-preflight", help="Validate a flow and return structured issues.")
     preflight_parser.add_argument("--file", help="Read flow JSON from file. Defaults to stdin.")
     discover_parser = subparsers.add_parser("mcp-tools", help="Discover tools exposed by a configured MCP server.")
     discover_parser.add_argument("--agent", required=True)
     discover_parser.add_argument("--server", required=True)
+    discover_parser.add_argument("--approved", action="store_true")
     compare_parser = subparsers.add_parser("run-compare", help="Compare candidate and baseline test runs.")
     compare_parser.add_argument("--baseline", required=True)
     compare_parser.add_argument("--candidate", required=True)
     revision_create_parser = subparsers.add_parser("revision-create", help="Create an auditable draft revision.")
     revision_create_parser.add_argument("--file", help="Read revision JSON from file. Defaults to stdin.")
+    revision_review_parser = subparsers.add_parser("revision-review", help="Review a passing revision comparison.")
+    revision_review_parser.add_argument("--id", type=int, required=True)
+    revision_review_parser.add_argument("--comparison-id", type=int, required=True)
     revision_apply_parser = subparsers.add_parser("revision-apply", help="Apply a reviewed revision.")
     revision_apply_parser.add_argument("--id", type=int, required=True)
     revision_revert_parser = subparsers.add_parser("revision-revert", help="Revert an applied revision.")
     revision_revert_parser.add_argument("--id", type=int, required=True)
+    internal_script_parser = subparsers.add_parser("_script-run", help=argparse.SUPPRESS)
+    internal_script_parser.add_argument("--file", required=True)
 
     browser_parser = subparsers.add_parser("browser-smoke", help="Run the initialized browser-control skill smoke test.")
     browser_parser.add_argument("--headed", action="store_true", help="Open a visible browser window.")
@@ -116,7 +133,13 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "run":
             config = load_config(workspace=workspace)
-            result = run_flow(config, goal=args.goal, flow_name=args.flow_name, flow_path=args.flow_path)
+            result = run_flow(
+                config,
+                goal=args.goal,
+                flow_name=args.flow_name,
+                flow_path=args.flow_path,
+                run_id=args.run_id,
+            )
             print(json.dumps(result, indent=2, ensure_ascii=False))
             return 0 if result["status"] == "success" else 1
         if args.command == "resume":
@@ -126,6 +149,10 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if result["status"] == "success" else 1
         if args.command == "flow-save":
             flow = _read_flow_payload(args.file)
+            preflight = preflight_flow(flow, load_config(workspace=workspace))
+            if not preflight["valid"]:
+                print(json.dumps(preflight, indent=2, ensure_ascii=False))
+                return 1
             target = save_flow(workspace, flow, name=args.name)
             print(json.dumps({"ok": True, "database": str(target), "flow": args.name}, ensure_ascii=False))
             return 0
@@ -149,15 +176,38 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "test-case-save":
             value = _read_json_payload(args.file)
-            print(json.dumps(AgentFirewallStore(workspace).save_test_case(value), indent=2, ensure_ascii=False))
+            print(json.dumps(save_test_case(load_config(workspace=workspace), value), indent=2, ensure_ascii=False))
             return 0
         if args.command == "test-case-run":
             config = load_config(workspace=workspace)
-            result = run_test_case(config, args.id, baseline_run_id=args.baseline_run_id, approved=args.approved)
+            result = run_test_case(
+                config,
+                args.id,
+                baseline_run_id=args.baseline_run_id,
+                revision_id=args.revision_id,
+                run_id=args.run_id,
+                approved=args.approved,
+            )
             print(json.dumps(result, indent=2, ensure_ascii=False))
             return 0 if result["status"] == "success" else 1
+        if args.command == "test-case-baseline-set":
+            result = set_test_run_baseline(load_config(workspace=workspace), args.run_id)
+            if result.get("test_case_id") != args.id:
+                raise ValueError("baseline run belongs to a different test case")
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+            return 0
         if args.command == "workbench-json":
             print(json.dumps(_workbench_payload(workspace), indent=2, ensure_ascii=False))
+            return 0
+        if args.command == "run-json":
+            result = AgentFirewallStore(workspace).get_run_details(args.run_id)
+            if result is None:
+                raise RuntimeError(f"run not found: {args.run_id}")
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+            return 0
+        if args.command == "run-cancel":
+            result = AgentFirewallStore(workspace).cancel_run(args.run_id)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
             return 0
         if args.command == "flow-preflight":
             config = load_config(workspace=workspace)
@@ -166,7 +216,13 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if result["valid"] else 1
         if args.command == "mcp-tools":
             config = load_config(workspace=workspace)
-            print(json.dumps(discover_mcp_tools(config, args.agent, args.server), indent=2, ensure_ascii=False))
+            print(
+                json.dumps(
+                    discover_mcp_tools(config, args.agent, args.server, approved=args.approved),
+                    indent=2,
+                    ensure_ascii=False,
+                )
+            )
             return 0
         if args.command == "run-compare":
             config = load_config(workspace=workspace)
@@ -181,7 +237,13 @@ def main(argv: list[str] | None = None) -> int:
                 target_ref=str(value["target_ref"]),
                 after=dict(value["after"]),
                 reason=str(value["reason"]),
+                test_case_id=int(value["test_case_id"]) if value.get("test_case_id") is not None else None,
+                baseline_run_id=str(value["baseline_run_id"]) if value.get("baseline_run_id") else None,
             )
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+            return 0
+        if args.command == "revision-review":
+            result = review_revision(load_config(workspace=workspace), args.id, args.comparison_id)
             print(json.dumps(result, indent=2, ensure_ascii=False))
             return 0
         if args.command == "revision-apply":
@@ -190,11 +252,19 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "revision-revert":
             print(json.dumps(revert_revision(load_config(workspace=workspace), args.id), indent=2, ensure_ascii=False))
             return 0
+        if args.command == "_script-run":
+            original_argv = sys.argv
+            try:
+                sys.argv = [args.file]
+                runpy.run_path(args.file, run_name="__main__")
+            finally:
+                sys.argv = original_argv
+            return 0
         if args.command == "browser-smoke":
             result = browser_smoke(headed=args.headed, install_browser=args.install_browser)
             print(json.dumps(result, indent=2, ensure_ascii=False))
             return 0 if result.get("ok") else 1
-    except (ConfigError, EngineError, FlowError, RunnerError, RuntimeError) as exc:
+    except (ConfigError, EngineError, FlowError, RunnerError, RuntimeError, ValueError, PermissionError, KeyError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     return 1
@@ -275,6 +345,7 @@ def _workspace_payload(workspace: Path, flow_name: str) -> dict[str, object]:
             "skills": value.get("skills") or [],
             "subagents": value.get("subagents") or [],
             "mcpServers": value.get("mcp_servers") or {},
+            "allowedMcpTools": value.get("allowed_mcp_tools") or {},
             "interruptOn": value.get("interrupt_on") or {},
             "responseFormat": value.get("response_format"),
             "checkpoint": value.get("checkpoint", True),

@@ -5,18 +5,24 @@ contextBridge.exposeInMainWorld("agentFirewall", {
   chooseWorkspace: () => ipcRenderer.invoke("workspace:choose"),
   saveConfig: (workspace, config) => ipcRenderer.invoke("config:save", { workspace, config }),
   saveTestCase: (workspace, testCase) => ipcRenderer.invoke("test-case:save", { workspace, testCase }),
-  runTestCase: (workspace, testCaseId, baselineRunId, approved) =>
-    ipcRenderer.invoke("test-case:run", { workspace, testCaseId, baselineRunId, approved }),
+  setTestBaseline: (workspace, testCaseId, runId) =>
+    ipcRenderer.invoke("test-case:baseline-set", { workspace, testCaseId, runId }),
+  runTestCase: (workspace, testCaseId, baselineRunId, approved, operationId, revisionId) =>
+    ipcRenderer.invoke("test-case:run", { workspace, testCaseId, baselineRunId, approved, operationId, revisionId }),
+  cancelOperation: (workspace, operationId) => ipcRenderer.invoke("operation:cancel", { workspace, operationId }),
   preflightFlow: (workspace, flow) => ipcRenderer.invoke("flow:preflight", { workspace, flow }),
-  discoverMcpTools: (workspace, agent, server) =>
-    ipcRenderer.invoke("mcp:discover", { workspace, agent, server }),
+  discoverMcpTools: (workspace, agent, server, approved) =>
+    ipcRenderer.invoke("mcp:discover", { workspace, agent, server, approved }),
   compareRuns: (workspace, baseline, candidate) =>
     ipcRenderer.invoke("run:compare", { workspace, baseline, candidate }),
+  getRunDetails: (workspace, runId) => ipcRenderer.invoke("run:details", { workspace, runId }),
   createRevision: (workspace, revision) => ipcRenderer.invoke("revision:create", { workspace, revision }),
+  reviewRevision: (workspace, revisionId, comparisonId) =>
+    ipcRenderer.invoke("revision:review", { workspace, revisionId, comparisonId }),
   applyRevision: (workspace, revisionId) => ipcRenderer.invoke("revision:apply", { workspace, revisionId }),
   revertRevision: (workspace, revisionId) => ipcRenderer.invoke("revision:revert", { workspace, revisionId }),
   saveFlow: (workspace, flow) => ipcRenderer.invoke("flow:save", { workspace, flow }),
-  startFlow: (workspace, flow) => ipcRenderer.invoke("flow:start", { workspace, flow }),
-  resumeFlow: (workspace, runId, correction) =>
-    ipcRenderer.invoke("flow:resume", { workspace, runId, correction })
+  startFlow: (workspace, flow, operationId) => ipcRenderer.invoke("flow:start", { workspace, flow, operationId }),
+  resumeFlow: (workspace, runId, correction, operationId) =>
+    ipcRenderer.invoke("flow:resume", { workspace, runId, correction, operationId })
 });

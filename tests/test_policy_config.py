@@ -12,6 +12,8 @@ def test_policy_configuration_is_normalized_and_loaded(tmp_path: Path) -> None:
         "require_approval": ["script", "mcp:delete"],
         "allowed_commands": ["python"],
         "allow_network": False,
+        "allowed_network_hosts": ["api.example.com"],
+        "allowed_env_vars": ["WORK_API_KEY"],
         "exposed_env": ["WORK_API_KEY"],
     }
     store.save_config(data)
@@ -20,3 +22,5 @@ def test_policy_configuration_is_normalized_and_loaded(tmp_path: Path) -> None:
 
     assert config.policy.require_approval == ["script", "mcp:delete"]
     assert config.policy.allow_network is False
+    assert config.policy.allowed_network_hosts == ["api.example.com"]
+    assert config.policy.allowed_env_vars == ["WORK_API_KEY"]

@@ -219,7 +219,7 @@ def test_paused_run_resumes_same_checkpoint(tmp_path: Path, monkeypatch: pytest.
     monkeypatch.setattr(
         runner,
         "build_agent_sync",
-        lambda config, name: lambda payload: {"messages": [{"content": "approved"}]},
+        lambda config, name, **_kwargs: lambda payload: {"messages": [{"content": "approved"}]},
     )
 
     paused = run_flow(config, goal="approve")

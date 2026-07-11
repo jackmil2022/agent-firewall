@@ -9,7 +9,9 @@ FAILURE_LAYERS = {
     "skill_not_found": "discovery",
     "script_not_found": "discovery",
     "mcp_tool_not_found": "selection",
+    "mcp_tool_not_discovered": "discovery",
     "invalid_arguments": "argument",
+    "invalid_schema": "discovery",
     "timeout": "execution",
     "script_failed": "execution",
     "exception": "execution",
@@ -33,25 +35,38 @@ def evaluate_assertions(
 
 
 def _evaluate_assertion(result: dict[str, Any], assertion: dict[str, Any], status: str) -> dict[str, Any]:
+    if not isinstance(assertion, dict):
+        return {"passed": False, "kind": "invalid", "message": "assertion must be an object"}
     kind = str(assertion.get("kind") or "")
     expected = assertion.get("expected")
-    if kind == "status":
-        actual = status
-        label = "status"
-    elif kind == "output_equals":
-        path = str(assertion.get("path") or "")
-        actual = _read_path(result.get("output") or {}, path)
-        label = f"output.{path}"
-    elif kind == "summary_contains":
-        actual = str(result.get("summary") or "")
-        passed = str(expected) in actual
-        return {"passed": passed, "kind": kind, "message": f"summary must contain {expected!r}" if not passed else "passed"}
-    elif kind == "min_artifacts":
-        actual = len(result.get("artifacts") or [])
-        passed = actual >= int(expected)
-        return {"passed": passed, "kind": kind, "message": f"artifacts expected at least {expected}, got {actual}" if not passed else "passed"}
-    else:
-        return {"passed": False, "kind": kind, "message": f"unsupported assertion kind: {kind}"}
+    try:
+        if kind == "status":
+            actual = status
+            label = "status"
+        elif kind == "output_equals":
+            path = str(assertion.get("path") or "")
+            actual = _read_path(result.get("output") or {}, path)
+            label = f"output.{path}"
+        elif kind == "summary_contains":
+            actual = str(result.get("summary") or "")
+            passed = str(expected) in actual
+            return {
+                "passed": passed,
+                "kind": kind,
+                "message": f"summary must contain {expected!r}" if not passed else "passed",
+            }
+        elif kind == "min_artifacts":
+            actual = len(result.get("artifacts") or [])
+            passed = actual >= int(expected)
+            return {
+                "passed": passed,
+                "kind": kind,
+                "message": f"artifacts expected at least {expected}, got {actual}" if not passed else "passed",
+            }
+        else:
+            return {"passed": False, "kind": kind, "message": f"unsupported assertion kind: {kind}"}
+    except (TypeError, ValueError) as exc:
+        return {"passed": False, "kind": kind or "invalid", "message": f"invalid assertion: {exc}"}
     passed = actual == expected
     return {
         "passed": passed,

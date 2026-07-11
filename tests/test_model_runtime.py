@@ -48,6 +48,57 @@ def test_resolve_model_builds_configured_chat_model(tmp_path: Path, monkeypatch:
     }
 
 
+def test_resolve_model_honors_openai_provider_with_unprefixed_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = _model_config(tmp_path, model="gpt-5")
+    monkeypatch.setenv("WORK_API_KEY", "secret")
+    captured = {}
+
+    class FakeChatModel:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr("langchain_openai.ChatOpenAI", FakeChatModel)
+
+    _resolve_model("work", config)
+
+    assert captured["model"] == "gpt-5"
+    assert captured["base_url"] == "https://models.example/v1"
+    assert captured["api_key"] == "secret"
+    assert captured["temperature"] == 0.1
+
+
+def test_resolve_model_uses_configured_non_openai_provider(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = _model_config(
+        tmp_path,
+        provider="anthropic",
+        model="claude-sonnet-4-5",
+        base_url="https://models.example/v1",
+    )
+    monkeypatch.setenv("WORK_API_KEY", "secret")
+    captured = {}
+
+    def fake_init_chat_model(**kwargs):
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr("langchain.chat_models.init_chat_model", fake_init_chat_model)
+
+    _resolve_model("work", config)
+
+    assert captured == {
+        "model": "claude-sonnet-4-5",
+        "model_provider": "anthropic",
+        "base_url": "https://models.example/v1",
+        "api_key": "secret",
+        "temperature": 0.1,
+        "max_tokens": 321,
+    }
+
+
 def test_resolve_model_rejects_disabled_preset(tmp_path: Path) -> None:
     config = _model_config(tmp_path, enabled=False)
 
@@ -61,3 +112,21 @@ def test_resolve_model_reports_missing_api_key(tmp_path: Path, monkeypatch: pyte
 
     with pytest.raises(ConfigError, match="WORK_API_KEY"):
         _resolve_model("work", config)
+
+
+def test_resolve_model_prefers_plaintext_api_key_over_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = _model_config(tmp_path, api_key="stored-secret")
+    monkeypatch.setenv("WORK_API_KEY", "environment-secret")
+    captured = {}
+
+    class FakeChatModel:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr("langchain_openai.ChatOpenAI", FakeChatModel)
+
+    _resolve_model("work", config)
+
+    assert captured["api_key"] == "stored-secret"

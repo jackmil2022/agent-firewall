@@ -2,6 +2,8 @@ const { spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
+const activeOperations = new Map();
+
 async function loadWorkspace(workspace) {
   return runPythonJson(workspace, ["-m", "agent_firewall", "workspace-json"]);
 }
@@ -20,23 +22,39 @@ async function saveTestCase(workspace, testCase) {
   return runPythonJson(workspace, ["-m", "agent_firewall", "test-case-save"], JSON.stringify(testCase));
 }
 
-async function runTestCase(workspace, testCaseId, baselineRunId = "", approved = false) {
+async function setTestBaseline(workspace, testCaseId, runId) {
+  return runPythonJson(workspace, [
+    "-m", "agent_firewall", "test-case-baseline-set",
+    "--id", String(testCaseId),
+    "--run-id", runId
+  ]);
+}
+
+async function runTestCase(workspace, testCaseId, baselineRunId = "", approved = false, operationId = "", revisionId = "") {
   const args = ["-m", "agent_firewall", "test-case-run", "--id", String(testCaseId)];
+  if (operationId) args.push("--run-id", operationId);
   if (baselineRunId) args.push("--baseline-run-id", baselineRunId);
+  if (revisionId) args.push("--revision-id", String(revisionId));
   if (approved) args.push("--approved");
-  return runPythonJsonResult(workspace, args);
+  return runPythonJsonResult(workspace, args, undefined, operationId);
 }
 
 async function preflightFlow(workspace, flow) {
   return runPythonJsonResult(workspace, ["-m", "agent_firewall", "flow-preflight"], JSON.stringify(flow));
 }
 
-async function discoverMcpTools(workspace, agent, server) {
-  return runPythonJson(workspace, ["-m", "agent_firewall", "mcp-tools", "--agent", agent, "--server", server]);
+async function discoverMcpTools(workspace, agent, server, approved = false) {
+  const args = ["-m", "agent_firewall", "mcp-tools", "--agent", agent, "--server", server];
+  if (approved) args.push("--approved");
+  return runPythonJson(workspace, args);
 }
 
 async function compareRuns(workspace, baseline, candidate) {
   return runPythonJson(workspace, ["-m", "agent_firewall", "run-compare", "--baseline", baseline, "--candidate", candidate]);
+}
+
+async function getRunDetails(workspace, runId) {
+  return runPythonJson(workspace, ["-m", "agent_firewall", "run-json", "--run-id", runId]);
 }
 
 async function createRevision(workspace, revision) {
@@ -47,20 +65,30 @@ async function applyRevision(workspace, revisionId) {
   return runPythonJson(workspace, ["-m", "agent_firewall", "revision-apply", "--id", String(revisionId)]);
 }
 
+async function reviewRevision(workspace, revisionId, comparisonId) {
+  return runPythonJson(workspace, [
+    "-m", "agent_firewall", "revision-review",
+    "--id", String(revisionId),
+    "--comparison-id", String(comparisonId)
+  ]);
+}
+
 async function revertRevision(workspace, revisionId) {
   return runPythonJson(workspace, ["-m", "agent_firewall", "revision-revert", "--id", String(revisionId)]);
 }
 
-async function saveAndStartFlow(workspace, flow) {
+async function saveAndStartFlow(workspace, flow, operationId = "") {
   await saveFlow(workspace, flow);
-  return startFlow(workspace);
+  return startFlow(workspace, operationId);
 }
 
-function startFlow(workspace) {
-  return runFlowCommand(workspace, ["-m", "agent_firewall", "run"]);
+function startFlow(workspace, operationId = "") {
+  const args = ["-m", "agent_firewall", "run"];
+  if (operationId) args.push("--run-id", operationId);
+  return runFlowCommand(workspace, args, operationId);
 }
 
-function resumeFlow(workspace, runId, correction = "") {
+function resumeFlow(workspace, runId, correction = "", operationId = "") {
   return runFlowCommand(workspace, [
     "-m",
     "agent_firewall",
@@ -69,28 +97,64 @@ function resumeFlow(workspace, runId, correction = "") {
     runId,
     "--correction",
     correction
-  ]);
+  ], operationId);
 }
 
-function runFlowCommand(workspace, args) {
+async function cancelOperation(workspace, operationId) {
+  const operation = activeOperations.get(operationId);
+  if (!operation) {
+    await cancelPersistedRun(workspace, operationId);
+    return true;
+  }
+  operation.cancelled = true;
+  operation.cancelPromise = cancelPersistedRun(operation.workspace, operationId);
+  operation.child.kill();
+  await operation.cancelPromise;
+  return true;
+}
+
+async function cancelPersistedRun(workspace, runId) {
+  let lastError;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      return await runPythonJson(workspace, ["-m", "agent_firewall", "run-cancel", "--run-id", runId]);
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+  throw lastError;
+}
+
+function runFlowCommand(workspace, args, operationId = "") {
   return new Promise((resolve) => {
     const startedAt = new Date().toISOString();
     const python = pythonCommand(workspace);
-    const child = spawn(python, args, {
+    const launchArgs = backendArgs(python, args);
+    const child = spawn(python, launchArgs, {
       cwd: workspace,
       env: { ...process.env },
       windowsHide: true
     });
+    const operation = trackOperation(operationId, child, workspace);
 
     let stdout = "";
     let stderr = "";
-    const timeout = setTimeout(() => {
+    const timeout = setTimeout(async () => {
+      forgetOperation(operationId, child);
       child.kill();
+      if (operationId) {
+        try {
+          await cancelPersistedRun(workspace, operationId);
+        } catch {
+          // The timeout result remains visible even if the run row disappeared.
+        }
+      }
       resolve({
         ok: false,
         status: "timeout",
         startedAt,
-        command: `${python} ${args.join(" ")}`,
+        command: `${python} ${launchArgs.join(" ")}`,
         stdout,
         stderr: `${stderr}\nTimed out after 60 seconds.`.trim()
       });
@@ -104,17 +168,38 @@ function runFlowCommand(workspace, args) {
     });
     child.on("error", (error) => {
       clearTimeout(timeout);
+      forgetOperation(operationId, child);
       resolve({
         ok: false,
         status: "error",
         startedAt,
-        command: `${python} ${args.join(" ")}`,
+        command: `${python} ${launchArgs.join(" ")}`,
         stdout,
         stderr: error.message
       });
     });
-    child.on("close", (code) => {
+    child.on("close", async (code) => {
       clearTimeout(timeout);
+      forgetOperation(operationId, child);
+      if (operation?.cancelled) {
+        try {
+          await operation.cancelPromise;
+        } catch {
+          // The cancel IPC reports persistence failures to the renderer.
+        }
+        resolve({
+          ok: false,
+          status: "cancelled",
+          code,
+          startedAt,
+          finishedAt: new Date().toISOString(),
+          command: `${python} ${launchArgs.join(" ")}`,
+          stdout: stdout.trim(),
+          stderr: stderr.trim(),
+          run: null
+        });
+        return;
+      }
       let run = null;
       try {
         run = JSON.parse(stdout);
@@ -127,7 +212,7 @@ function runFlowCommand(workspace, args) {
         code,
         startedAt,
         finishedAt: new Date().toISOString(),
-        command: `${python} ${args.join(" ")}`,
+        command: `${python} ${launchArgs.join(" ")}`,
         stdout: stdout.trim(),
         stderr: stderr.trim(),
         run
@@ -138,7 +223,8 @@ function runFlowCommand(workspace, args) {
 
 function runPythonJson(workspace, args, stdin) {
   return new Promise((resolve, reject) => {
-    const child = spawn(pythonCommand(workspace), args, {
+    const command = pythonCommand(workspace);
+    const child = spawn(command, backendArgs(command, args), {
       cwd: workspace,
       env: { ...process.env },
       windowsHide: true
@@ -168,15 +254,30 @@ function runPythonJson(workspace, args, stdin) {
   });
 }
 
-function runPythonJsonResult(workspace, args, stdin) {
+function runPythonJsonResult(workspace, args, stdin, operationId = "") {
   return new Promise((resolve, reject) => {
-    const child = spawn(pythonCommand(workspace), args, { cwd: workspace, env: { ...process.env }, windowsHide: true });
+    const command = pythonCommand(workspace);
+    const child = spawn(command, backendArgs(command, args), { cwd: workspace, env: { ...process.env }, windowsHide: true });
+    const operation = trackOperation(operationId, child, workspace);
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
     child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
-    child.on("error", reject);
-    child.on("close", () => {
+    child.on("error", (error) => {
+      forgetOperation(operationId, child);
+      reject(error);
+    });
+    child.on("close", async () => {
+      forgetOperation(operationId, child);
+      if (operation?.cancelled) {
+        try {
+          await operation.cancelPromise;
+        } catch {
+          // The cancel IPC reports persistence failures to the renderer.
+        }
+        resolve({ status: "cancelled", cancelled: true, events: [] });
+        return;
+      }
       try {
         resolve(JSON.parse(stdout));
       } catch (error) {
@@ -188,6 +289,17 @@ function runPythonJsonResult(workspace, args, stdin) {
   });
 }
 
+function trackOperation(operationId, child, workspace) {
+  if (!operationId) return null;
+  const operation = { child, workspace, cancelled: false };
+  activeOperations.set(operationId, operation);
+  return operation;
+}
+
+function forgetOperation(operationId, child) {
+  if (activeOperations.get(operationId)?.child === child) activeOperations.delete(operationId);
+}
+
 function pythonCommand(workspace) {
   const packaged = process.resourcesPath && path.join(
     process.resourcesPath,
@@ -196,11 +308,20 @@ function pythonCommand(workspace) {
   );
   if (packaged && fs.existsSync(packaged)) return packaged;
   if (process.env.PYTHON) return process.env.PYTHON;
+  const development = process.platform === "win32"
+    ? path.resolve(__dirname, "..", ".venv", "Scripts", "python.exe")
+    : path.resolve(__dirname, "..", ".venv", "bin", "python");
+  if (fs.existsSync(development)) return development;
   const local = process.platform === "win32"
     ? path.join(workspace, ".venv", "Scripts", "python.exe")
     : path.join(workspace, ".venv", "bin", "python");
   if (fs.existsSync(local)) return local;
   return process.platform === "win32" ? "python" : "python3";
+}
+
+function backendArgs(command, args) {
+  const name = String(command).split(/[\\/]/).pop();
+  return /^agent-firewall(?:\.exe)?$/i.test(name) ? args.slice(2) : args;
 }
 
 function assertInsideWorkspace(workspace, target) {
@@ -214,15 +335,21 @@ module.exports = {
   loadWorkspace,
   saveConfig,
   saveTestCase,
+  setTestBaseline,
   runTestCase,
   preflightFlow,
   discoverMcpTools,
   compareRuns,
+  getRunDetails,
   createRevision,
+  reviewRevision,
   applyRevision,
   revertRevision,
   saveFlow,
   saveAndStartFlow,
   startFlow,
-  resumeFlow
+  resumeFlow,
+  cancelOperation,
+  backendArgs,
+  pythonCommand
 };

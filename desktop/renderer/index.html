@@ -3,6 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'" />
     <title>Agent Firewall</title>
     <link rel="stylesheet" href="../node_modules/drawflow/dist/drawflow.min.css" />
     <link rel="stylesheet" href="./styles.css" />
@@ -59,8 +60,8 @@
                 <h2 id="workbenchTitle">测试与修复</h2>
               </div>
               <div class="view-context">
-                <span class="status-dot idle" aria-hidden="true"></span>
-                <span>未运行</span>
+                <span id="workbenchStatusDot" class="status-dot idle" aria-hidden="true"></span>
+                <span id="workbenchStatusText">未运行</span>
               </div>
             </header>
 
@@ -71,7 +72,10 @@
                     <span>测试用例</span>
                     <strong>定义目标与判定条件</strong>
                   </div>
-                  <button id="saveTestCase" class="small-button" type="button">保存</button>
+                  <div class="panel-heading-actions">
+                    <button id="newTestCase" class="small-button" type="button">新建</button>
+                    <button id="saveTestCase" class="small-button" type="button">保存</button>
+                  </div>
                 </div>
                 <div id="testCaseList" class="test-case-list" aria-label="测试用例列表">
                   <button class="test-case-item active" type="button">
@@ -104,7 +108,14 @@
                   </div>
                 </div>
                 <div class="panel-actions">
-                  <button id="runTestCase" class="primary-button" type="button">▶ 运行测试</button>
+                  <div class="baseline-strip">
+                    <span><strong id="baselineStatus">未设置基线</strong><code id="baselineRunId">--</code></span>
+                    <button id="setBaseline" class="small-button" type="button" disabled>设为基线</button>
+                  </div>
+                  <div class="case-run-actions">
+                    <button id="runTestCase" class="primary-button" type="button">▶ 运行测试</button>
+                    <button id="cancelTestRun" class="danger-button" type="button" title="终止本地后端进程并写入取消终态" disabled>取消测试</button>
+                  </div>
                 </div>
               </aside>
 
@@ -114,7 +125,7 @@
                     <span>执行轨迹</span>
                     <strong>输入、调用与结果证据</strong>
                   </div>
-                  <span class="status-label neutral">等待运行</span>
+                  <span id="traceStatus" class="status-label neutral">等待运行</span>
                 </div>
                 <div id="traceList" class="trace-list panel-scroll" aria-live="polite">
                   <div class="empty-state">
@@ -124,9 +135,9 @@
                   </div>
                 </div>
                 <footer class="trace-footer">
-                  <span>0 个事件</span>
-                  <span>耗时 --</span>
-                  <span>Token --</span>
+                  <span id="traceEventCount">0 个事件</span>
+                  <span id="traceDuration">耗时 --</span>
+                  <span id="traceStreamMode">事件：SQLite 实时载入</span>
                 </footer>
               </section>
 
@@ -151,16 +162,36 @@
                     <div class="empty-inline">暂无可核验的运行证据。</div>
                   </section>
                   <section class="revision-section">
-                    <div class="section-title"><span>候选修改</span><small>统一 Diff</small></div>
+                    <div class="section-title"><span>候选修改</span><small id="revisionState">尚未创建</small></div>
+                    <select id="revisionSelect" aria-label="候选修改">
+                      <option value="">选择修订</option>
+                    </select>
                     <pre id="revisionDiff" class="revision-diff">尚未生成修改。</pre>
+                    <details class="revision-composer">
+                      <summary>创建候选修改</summary>
+                      <div class="field-row">
+                        <label for="revisionTarget">证据用例</label>
+                        <select id="revisionTarget"></select>
+                      </div>
+                      <div class="field-row">
+                        <label for="revisionReason">修改原因</label>
+                        <input id="revisionReason" type="text" autocomplete="off" />
+                      </div>
+                      <div class="field-row">
+                        <label for="revisionAfterJson">变更字段 JSON</label>
+                        <textarea id="revisionAfterJson" class="code-input" rows="6" spellcheck="false">{}</textarea>
+                      </div>
+                      <button id="createRevision" type="button">创建待审核修改</button>
+                    </details>
                   </section>
                 </div>
                 <div class="repair-actions">
                   <button id="approveOperation" class="primary-button" type="button" disabled>批准本次操作</button>
-                  <button id="applyRevision" class="primary-button" type="button" disabled>应用修改</button>
-                  <button id="revertRevision" type="button" disabled>撤销</button>
+                  <button id="runRevisionCandidate" type="button" disabled>运行修订候选</button>
+                  <button id="reviewRevision" type="button" disabled>审核比较证据</button>
+                  <button id="applyRevision" class="primary-button" type="button" disabled>应用已审核修改</button>
+                  <button id="revertRevision" type="button" disabled>回滚修改</button>
                   <button id="rerunTestCase" type="button" disabled>重新运行</button>
-                  <button id="abandonRun" class="danger-button" type="button" disabled>放弃运行</button>
                 </div>
               </aside>
             </div>
@@ -174,15 +205,15 @@
               </div>
               <div class="header-actions">
                 <input id="capabilitySearch" class="compact-search" type="search" placeholder="搜索 Agent、Skill 或 MCP Tool" />
-                <button class="primary-button" type="button">导入能力</button>
+                <button id="configureCapability" class="primary-button" type="button">配置能力</button>
               </div>
             </header>
             <div class="capability-toolbar">
               <div class="segmented" role="tablist" aria-label="能力类型">
-                <button class="active" type="button">全部</button>
-                <button type="button">Agent</button>
-                <button type="button">Skill</button>
-                <button type="button">MCP Tool</button>
+                <button class="active" data-capability-kind="" type="button">全部</button>
+                <button data-capability-kind="agent" type="button">Agent</button>
+                <button data-capability-kind="skill" type="button">Skill</button>
+                <button data-capability-kind="mcp_tool" type="button">MCP Tool</button>
               </div>
               <div class="legend">
                 <span><i class="status-dot idle"></i>未检查</span>
@@ -206,18 +237,20 @@
                 <h2 id="runsTitle">运行记录</h2>
               </div>
               <div class="header-actions">
-                <select class="compact-select" aria-label="运行状态筛选">
-                  <option>全部状态</option>
-                  <option>成功</option>
-                  <option>失败</option>
-                  <option>等待审批</option>
+                <select id="runStatusFilter" class="compact-select" aria-label="运行状态筛选">
+                  <option value="">全部状态</option>
+                  <option value="success">成功</option>
+                  <option value="failed">失败</option>
+                  <option value="needs_input">等待审批</option>
+                  <option value="running">运行中</option>
+                  <option value="cancelled">已取消</option>
                 </select>
-                <button type="button">刷新</button>
+                <button id="refreshRuns" type="button">刷新</button>
               </div>
             </header>
             <div class="table-shell">
               <div class="table-head" aria-hidden="true">
-                <span>运行</span><span>测试用例 / 目标</span><span>状态</span><span>耗时</span><span>开始时间</span>
+                <span>类型 / 运行</span><span>测试用例 / 目标</span><span>状态 / 比较</span><span>耗时</span><span>开始时间</span><span>操作</span>
               </div>
               <div id="runHistoryList" class="run-history-list panel-scroll">
                 <div class="empty-state wide">
@@ -240,10 +273,11 @@
             <div class="policy-layout panel-scroll">
               <div id="policyStatus" class="policy-status">
                 <div><span class="status-dot idle"></span><span><strong>策略尚未检查</strong><small>运行健康检查以验证执行边界</small></span></div>
-                <button type="button">运行检查</button>
+                <button id="runPolicyCheck" type="button">运行检查</button>
               </div>
               <section class="settings-band">
                 <header><h3>工具审批</h3><p>高风险命令、写文件和外部调用在执行前暂停。</p></header>
+                <label class="toggle-row"><span><strong>Agent 审批</strong><small>模型调用前暂停</small></span><input id="policyAgentApproval" type="checkbox" /></label>
                 <label class="toggle-row"><span><strong>Script Action 审批</strong><small>脚本执行前暂停</small></span><input id="policyScriptApproval" type="checkbox" /></label>
                 <label class="toggle-row"><span><strong>MCP Tool 审批</strong><small>按工具标识加入审批列表</small></span><input id="policyMcpApproval" type="checkbox" /></label>
               </section>
@@ -251,12 +285,12 @@
                 <header><h3>资源范围</h3><p>统一约束 Agent、Skill Action 和 MCP Tool。</p></header>
                 <div class="field-row"><label for="policyWorkspace">允许的工作目录</label><input id="policyWorkspace" type="text" readonly /></div>
                 <label class="toggle-row"><span><strong>允许外部网络</strong><small>MCP 远程传输与 Agent 外部访问</small></span><input id="policyAllowNetwork" type="checkbox" /></label>
+                <div class="field-row"><label for="policyNetworkHosts">允许的网络主机</label><textarea id="policyNetworkHosts" rows="3" placeholder="每行一个主机；留空表示允许任意主机"></textarea></div>
                 <div class="field-row"><label for="policyCommands">允许的命令</label><textarea id="policyCommands" rows="3" placeholder="每行一个命令"></textarea></div>
               </section>
               <section class="settings-band">
                 <header><h3>审计与密钥</h3><p>运行事件落库，敏感值只记录变量名。</p></header>
-                <label class="toggle-row"><span><strong>记录工具输入输出</strong><small>受脱敏规则约束</small></span><input type="checkbox" checked /></label>
-                <div class="field-row"><label for="policyExposedEnv">允许运行时读取的环境变量名</label><textarea id="policyExposedEnv" rows="3" placeholder="每行一个变量名"></textarea></div>
+                <div class="field-row"><label for="policyExposedEnv">允许且需要脱敏的环境变量名</label><textarea id="policyExposedEnv" rows="4" placeholder="每行一个变量名"></textarea></div>
               </section>
             </div>
           </section>
@@ -314,6 +348,10 @@
                   <div class="field-row">
                     <label for="modelBaseUrlInput">Base URL</label>
                     <input id="modelBaseUrlInput" type="text" autocomplete="off" />
+                  </div>
+                  <div class="field-row">
+                    <label for="modelApiKeyInput">API key</label>
+                    <input id="modelApiKeyInput" type="text" autocomplete="off" />
                   </div>
                   <div class="field-row">
                     <label for="modelApiKeyEnvInput">API key env</label>
@@ -375,6 +413,10 @@
                     <textarea id="mcpServersInput" rows="10" spellcheck="false"></textarea>
                   </div>
                   <div class="field-row">
+                    <label for="allowedMcpToolsInput">允许 MCP Tool JSON</label>
+                    <textarea id="allowedMcpToolsInput" rows="5" spellcheck="false"></textarea>
+                  </div>
+                  <div class="field-row">
                     <label for="modelStatus">状态</label>
                     <pre id="modelStatus">就绪。</pre>
                   </div>
@@ -424,6 +466,7 @@
                 <div class="canvas-actionbar" aria-label="编排操作">
                   <button id="saveFlow" type="button">保存编排</button>
                   <button id="startFlow" class="primary-button" type="button">▶ 保存并运行</button>
+                  <button id="cancelFlow" class="danger-button" type="button" title="终止本地后端进程并写入取消终态" disabled>取消运行</button>
                 </div>
               </section>
 
@@ -439,7 +482,7 @@
                     <strong id="runStatus">空闲</strong>
                   </div>
                   <pre id="runOutput">就绪。</pre>
-                  <button id="resumeFlow" type="button" disabled>继续运行</button>
+                  <button id="resumeFlow" type="button" disabled>提交修正并恢复</button>
                 </div>
                 <div class="config-summary">
                   <span>ACP</span>

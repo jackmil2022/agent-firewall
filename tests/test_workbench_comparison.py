@@ -3,7 +3,7 @@ from pathlib import Path
 from agent_firewall.config import load_config, write_default_config
 from agent_firewall.skills import install_bundled_skills
 from agent_firewall.store import AgentFirewallStore
-from agent_firewall.workbench import compare_test_runs, run_test_case
+from agent_firewall.workbench import compare_test_runs, run_test_case, set_test_run_baseline
 
 
 def test_same_test_case_can_save_baseline_and_compare_candidate(tmp_path: Path) -> None:
@@ -22,6 +22,7 @@ def test_same_test_case_can_save_baseline_and_compare_candidate(tmp_path: Path) 
     )
     config = load_config(workspace=tmp_path)
     baseline = run_test_case(config, case["id"])
+    set_test_run_baseline(config, baseline["run_id"])
     candidate = run_test_case(config, case["id"], baseline_run_id=baseline["run_id"])
 
     comparison = compare_test_runs(config, baseline["run_id"], candidate["run_id"])
