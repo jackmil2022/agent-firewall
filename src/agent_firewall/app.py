@@ -13,6 +13,7 @@ from .capabilities import discover_mcp_tools, list_capabilities
 from .config import APP_DIR, AgentFirewallConfig, ConfigError, load_config, load_config_mapping, normalize_config_mapping, write_default_config
 from .engine import EngineError, build_agent_sync, probe_model_connection
 from .flow import FlowError, load_flow, preflight_flow, save_flow
+from .imports import import_local_skill
 from .runner import RunnerError, resume_flow, run_flow
 from .revisions import apply_revision, create_revision, review_revision, revert_revision
 from .skills import install_bundled_skills, list_skill_manifests
@@ -87,6 +88,8 @@ def main(argv: list[str] | None = None) -> int:
     discover_parser.add_argument("--agent", required=True)
     discover_parser.add_argument("--server", required=True)
     discover_parser.add_argument("--approved", action="store_true")
+    import_parser = subparsers.add_parser("capability-import-local", help="Import a local Skill directory into the managed library.")
+    import_parser.add_argument("--source", required=True)
     compare_parser = subparsers.add_parser("run-compare", help="Compare candidate and baseline test runs.")
     compare_parser.add_argument("--baseline", required=True)
     compare_parser.add_argument("--candidate", required=True)
@@ -227,6 +230,9 @@ def main(argv: list[str] | None = None) -> int:
                     ensure_ascii=False,
                 )
             )
+            return 0
+        if args.command == "capability-import-local":
+            print(json.dumps(import_local_skill(workspace, args.source), ensure_ascii=False))
             return 0
         if args.command == "run-compare":
             config = load_config(workspace=workspace)

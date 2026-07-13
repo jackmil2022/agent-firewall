@@ -13,6 +13,7 @@ const {
   cancelOperation,
   preflightFlow,
   discoverMcpTools,
+  importLocalCapability,
   compareRuns,
   getRunDetails,
   createRevision,
@@ -110,6 +111,14 @@ function registerIpc() {
     preflightFlow(path.resolve(payload.workspace), payload.flow));
   ipcMain.handle("mcp:discover", async (_event, payload) =>
     discoverMcpTools(path.resolve(payload.workspace), payload.agent, payload.server, payload.approved));
+  ipcMain.handle("capability:import-local", async (_event, workspaceArg) => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ["openDirectory"],
+      title: "选择包含 SKILL.md 的本地能力目录"
+    });
+    if (result.canceled || !result.filePaths[0]) return null;
+    return importLocalCapability(path.resolve(workspaceArg), result.filePaths[0]);
+  });
   ipcMain.handle("run:compare", async (_event, payload) =>
     compareRuns(path.resolve(payload.workspace), payload.baseline, payload.candidate));
   ipcMain.handle("run:details", async (_event, payload) => {

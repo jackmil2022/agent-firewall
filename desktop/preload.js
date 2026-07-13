@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld("agentFirewall", {
   preflightFlow: (workspace, flow) => ipcRenderer.invoke("flow:preflight", { workspace, flow }),
   discoverMcpTools: (workspace, agent, server, approved) =>
     ipcRenderer.invoke("mcp:discover", { workspace, agent, server, approved }),
+  importLocalCapability: (workspace) => ipcRenderer.invoke("capability:import-local", workspace),
   compareRuns: (workspace, baseline, candidate) =>
     ipcRenderer.invoke("run:compare", { workspace, baseline, candidate }),
   getRunDetails: (workspace, runId) => ipcRenderer.invoke("run:details", { workspace, runId }),

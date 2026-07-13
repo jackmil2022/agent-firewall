@@ -1,12 +1,12 @@
 const state = {
   workspace: null,
   data: null,
-  activeTab: "models",
+  activeTab: "agents",
   inventoryQuery: "",
   selectedNodeId: null,
   editor: null,
   renderingFlow: false,
-  activeView: "workbench",
+  activeView: "advanced",
   selectedModelKey: "",
   canvasPan: null,
   lastRun: null,
@@ -56,6 +56,7 @@ const els = {
   runStatus: document.querySelector("#runStatus"),
   runOutput: document.querySelector("#runOutput"),
   flowCorrectionInput: document.querySelector("#flowCorrectionInput"),
+  flowRunGoal: document.querySelector("#flowRunGoal"),
   resumeFlow: document.querySelector("#resumeFlow"),
   activeAgentSelect: document.querySelector("#activeAgentSelect"),
   agentModelGlobalName: document.querySelector("#agentModelGlobalName"),
@@ -82,7 +83,10 @@ const els = {
   acpBufferInput: document.querySelector("#acpBufferInput"),
   mcpServersInput: document.querySelector("#mcpServersInput"),
   allowedMcpToolsInput: document.querySelector("#allowedMcpToolsInput"),
-  modelStatus: document.querySelector("#modelStatus")
+  modelStatus: document.querySelector("#modelStatus"),
+  inventorySearch: document.querySelector("#inventorySearch"),
+  inventoryCount: document.querySelector("#inventoryCount"),
+  inventoryList: document.querySelector("#inventoryList")
   ,workbenchView: document.querySelector("#workbenchView")
   ,capabilityView: document.querySelector("#capabilityView")
   ,runsView: document.querySelector("#runsView")
@@ -257,7 +261,7 @@ function wireEvents() {
       renderCapabilityList(state.data?.capabilities || []);
     });
   });
-  els.configureCapability?.addEventListener("click", () => setActiveView("settings"));
+  els.configureCapability?.addEventListener("click", () => importLocalCapability());
   els.revisionSelect?.addEventListener("change", () => selectRevision(Number(els.revisionSelect.value) || null));
   els.createRevision?.addEventListener("click", () => createWorkbenchRevision());
   els.runRevisionCandidate?.addEventListener("click", () => executeWorkbenchCase(false, state.selectedRevisionId));
@@ -283,7 +287,8 @@ function wireEvents() {
     els.runOutput.textContent = "本地后端进程运行中，正在从 SQLite 增量载入事件。";
     setFlowDebug(debug ? "调试运行中" : "运行中", "正在从开始节点执行到结束节点，详细事件会同步到右侧运行日志。", "running");
     try {
-      const result = await window.agentFirewall.startFlow(state.workspace, flow, "Execute the configured goal chain.", operationId);
+      const goal = els.flowRunGoal.value.trim() || "执行已配置工作流";
+      const result = await window.agentFirewall.startFlow(state.workspace, flow, goal, operationId);
       state.lastRun = result.run;
       els.runStatus.textContent = translateStatus(result.status);
       els.runOutput.textContent = formatRunResult(result);
@@ -551,26 +556,15 @@ function setWorkspaceData(data) {
 function inventoryItems() {
   if (!state.data) return [];
   if (state.activeTab === "agents") {
-    return state.data.agents.map((agent) => ({
-      id: agent.key,
+    return (state.data.capabilities || []).filter((item) => item.kind === "agent").map((agent) => ({
+      id: agent.id,
       type: "agent",
       label: agent.name,
-      subtitle: agent.model,
-      description: agent.systemPrompt,
+      subtitle: agent.model || agent.ref,
+      description: agent.description || "使用该 Agent 执行自然语言目标",
+      ref: agent.ref,
+      params: { goal: "" },
       meta: agent
-    }));
-  }
-  if (state.activeTab === "models") {
-    const config = state.data.config || {};
-    ensureModels(config);
-    return Object.entries(config.models || {}).map(([key, model]) => ({
-      id: key,
-      type: "model",
-      label: model.display_name || key,
-      subtitle: model.model || "",
-      description: `${model.provider || "custom"} / ${model.enabled === false ? "禁用" : "启用"}`,
-      meta: { key, ...model },
-      draggable: false
     }));
   }
   if (state.activeTab === "skills") {
@@ -639,7 +633,7 @@ function filterInventoryItems(items) {
 function normalizeGoalNodes(flow, activeAgent) {
   const agent = state.data?.agents?.find((item) => item.key === activeAgent) || state.data?.agents?.[0];
   flow.nodes = flow.nodes.map((node) => {
-    if (node.type === "start" || node.type === "end") return node;
+    if (node.type && node.type !== "goal") return node;
     const goal = String(node.params?.goal || "").trim();
     return {
       ...node,
@@ -857,11 +851,16 @@ function nodeHtml(node) {
       </div>
     `;
   }
+  const summary = node.type === "agent"
+    ? node.params?.goal || "等待填写目标"
+    : node.type === "skill"
+      ? `脚本：${node.params?.script || "未选择"}`
+      : `工具：${node.params?.tool || node.label}`;
   return `
     <div class="flow-node-card">
-      <span class="pill agent">目标</span>
+      <span class="pill ${escapeHtml(node.type)}">${escapeHtml(translateType(node.type))}</span>
       <h3>${escapeHtml(node.label)}</h3>
-      <code>${escapeHtml(node.params?.goal || "等待填写目标")}</code>
+      <code>${escapeHtml(summary)}</code>
     </div>
   `;
 }
@@ -880,13 +879,30 @@ function renderDetails() {
     els.detailsBody.innerHTML = "<p>边界节点由系统管理。</p>";
     return;
   }
-  els.detailsBody.innerHTML = `
-    ${nodePolicyHtml(node)}
-  `;
+  const outgoing = state.data.flow.edges.filter((edge) => edge.from === node.id);
+  els.detailsBody.innerHTML = `${nodePolicyHtml(node)}${outgoingEdgesHtml(outgoing)}`;
   wireNodePolicy(node);
+  wireOutgoingEdges(outgoing);
 }
 
 function nodePolicyHtml(node) {
+  if (node.type === "skill") {
+    return `
+      <div class="node-policy">
+        <h2>${escapeHtml(node.label)}</h2>
+        <p>Skill 仅执行明确选择的脚本，运行前会进行路径和策略检查。</p>
+        <code>${escapeHtml(node.params?.script || "未选择脚本")}</code>
+      </div>`;
+  }
+  if (node.type === "mcp") {
+    return `
+      <div class="node-policy">
+        <h2>${escapeHtml(node.label)}</h2>
+        <p>来源：${escapeHtml(node.params?.server || node.ref || "MCP Server")}</p>
+        <p>工具：${escapeHtml(node.params?.tool || "未选择")}</p>
+        <p>参数按已发现的工具契约在运行前校验。</p>
+      </div>`;
+  }
   return `
     <div class="node-policy goal-node-editor">
       <h2>${escapeHtml(node.label || "目标节点")}</h2>
@@ -921,7 +937,7 @@ function wireNodePolicy(node) {
   if (!button) return;
   button.addEventListener("click", () => {
     const goal = document.querySelector("#nodeGoal")?.value.trim() || "";
-    node.params = { goal };
+    node.params = { ...node.params, goal };
     node.label = goal ? goal.slice(0, 28) : "新目标";
     updateEditorNodeData(node);
     renderCanvas();
@@ -1611,6 +1627,20 @@ async function discoverMcpServer(capabilityId) {
   } catch (error) {
     state.mcpDiscoveryStatus[capabilityId] = { status: "error", message: error.message };
     renderCapabilityList(state.data.capabilities || []);
+  }
+}
+
+async function importLocalCapability() {
+  if (!state.workspace) return;
+  try {
+    const imported = await window.agentFirewall.importLocalCapability(state.workspace);
+    if (!imported) return;
+    await refreshWorkspaceData();
+    state.capabilityQuery = imported.name.toLowerCase();
+    els.capabilitySearch.value = imported.name;
+    renderCapabilityList(state.data.capabilities || []);
+  } catch (error) {
+    setWorkbenchError(error.message);
   }
 }
 

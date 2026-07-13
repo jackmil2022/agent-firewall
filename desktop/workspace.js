@@ -53,6 +53,10 @@ async function discoverMcpTools(workspace, agent, server, approved = false) {
   return runPythonJson(workspace, args);
 }
 
+async function importLocalCapability(workspace, source) {
+  return runPythonJson(workspace, ["-m", "agent_firewall", "capability-import-local", "--source", source]);
+}
+
 async function compareRuns(workspace, baseline, candidate) {
   return runPythonJson(workspace, ["-m", "agent_firewall", "run-compare", "--baseline", baseline, "--candidate", candidate]);
 }
@@ -349,6 +353,7 @@ module.exports = {
   runTestCase,
   preflightFlow,
   discoverMcpTools,
+  importLocalCapability,
   compareRuns,
   getRunDetails,
   createRevision,

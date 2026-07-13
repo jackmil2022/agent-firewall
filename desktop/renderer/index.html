@@ -27,11 +27,11 @@
       <div class="app-body">
         <aside class="sidebar">
           <nav class="main-nav" aria-label="主导航">
+            <button class="view-toggle active" data-view="advanced" type="button" title="工作流">
+              <span class="nav-icon" aria-hidden="true">⌘</span><span>工作流</span>
+            </button>
             <button class="view-toggle" data-view="capability" type="button" title="能力库">
               <span class="nav-icon" aria-hidden="true">◇</span><span>能力库</span>
-            </button>
-            <button class="view-toggle active" data-view="workbench" type="button" title="测试与修复">
-              <span class="nav-icon" aria-hidden="true">▶</span><span>测试与修复</span>
             </button>
             <button class="view-toggle" data-view="runs" type="button" title="运行记录">
               <span class="nav-icon" aria-hidden="true">≡</span><span>运行记录</span>
@@ -42,8 +42,8 @@
             <button class="view-toggle" data-view="settings" type="button" title="设置">
               <span class="nav-icon" aria-hidden="true">⚙</span><span>设置</span>
             </button>
-            <button class="view-toggle" data-view="advanced" type="button" title="高级编排">
-              <span class="nav-icon" aria-hidden="true">⌘</span><span>高级编排</span>
+            <button class="view-toggle" data-view="workbench" type="button" title="测试与修复">
+              <span class="nav-icon" aria-hidden="true">▶</span><span>测试与修复</span>
             </button>
           </nav>
           <div class="sidebar-foot">
@@ -53,7 +53,7 @@
         </aside>
 
         <div class="view-stack">
-          <section id="workbenchView" class="app-view active-view" aria-labelledby="workbenchTitle">
+          <section id="workbenchView" class="app-view hidden" aria-labelledby="workbenchTitle">
             <header class="view-header">
               <div>
                 <span class="eyebrow">验证闭环</span>
@@ -205,7 +205,7 @@
               </div>
               <div class="header-actions">
                 <input id="capabilitySearch" class="compact-search" type="search" placeholder="搜索 Agent、Skill 或 MCP Tool" />
-                <button id="configureCapability" class="primary-button" type="button">配置能力</button>
+                <button id="configureCapability" class="primary-button" type="button">导入本地能力</button>
               </div>
             </header>
             <div class="capability-toolbar">
@@ -426,21 +426,28 @@
             </section>
           </section>
 
-          <section id="advancedFlowView" class="app-view hidden" aria-labelledby="advancedTitle">
+          <section id="advancedFlowView" class="app-view active-view" aria-labelledby="advancedTitle">
             <header class="view-header">
               <div>
-                <span class="eyebrow">高级模式</span>
-                <h2 id="advancedTitle">高级编排</h2>
+                <span class="eyebrow">可视化自动化</span>
+                <h2 id="advancedTitle">工作流</h2>
               </div>
-              <span class="view-note">每个节点描述一个目标，Agent 自主选择 Skills 执行</span>
+              <span class="view-note">使用已配置的 Agent、Skill Action 和 MCP Tool 编排并运行</span>
             </header>
             <section id="flowView" class="workspace-grid">
               <aside class="inventory">
                 <div class="panel-heading">
-                  <div><span>目标节点</span><strong>每个节点由 Agent 执行</strong></div>
-                  <button id="newGoalNode" class="small-button" type="button">新建目标</button>
+                  <div><span>能力与结构</span><strong>拖入画布开始编排</strong></div>
+                  <button id="newGoalNode" class="small-button" type="button">添加 Agent</button>
                 </div>
-                <div class="inventory-list"><div class="empty-inline">在画布中选择节点，填写自然语言目标。Agent 会按目标自主使用已挂载的 Skills。</div></div>
+                <input id="inventorySearch" class="compact-search" type="search" placeholder="搜索能力" />
+                <div class="segmented inventory-tabs" role="tablist" aria-label="能力类型">
+                  <button class="tab active" data-tab="agents" type="button">Agent</button>
+                  <button class="tab" data-tab="skills" type="button">Skill</button>
+                  <button class="tab" data-tab="mcp" type="button">Tool</button>
+                </div>
+                <div class="inventory-meta"><span><strong id="inventoryCount">0</strong> 个可用能力</span></div>
+                <div id="inventoryList" class="inventory-list panel-scroll"></div>
               </aside>
 
               <section class="canvas-wrap">
@@ -460,6 +467,9 @@
                 </section>
                 <div id="flowCanvas" class="flow-canvas" aria-label="智能体编排画布"></div>
                 <div class="canvas-actionbar" aria-label="编排操作">
+                  <label class="run-goal-field" for="flowRunGoal">本次目标
+                    <input id="flowRunGoal" type="text" value="执行已配置工作流" autocomplete="off" />
+                  </label>
                   <button id="saveFlow" type="button">保存编排</button>
                   <button id="debugFlow" type="button">调试流程</button>
                   <button id="startFlow" class="primary-button" type="button">▶ 保存并运行</button>
@@ -469,7 +479,7 @@
 
               <aside class="details">
                 <div class="panel-heading">
-                  <div><span>节点详情</span><strong>执行目标</strong></div>
+                  <div><span>节点设置</span><strong>输入与路由</strong></div>
                   <strong id="selectedType">未选择</strong>
                 </div>
                 <div id="detailsBody" class="details-body"></div>

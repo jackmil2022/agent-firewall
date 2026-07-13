@@ -1,24 +1,24 @@
 :root {
-  --bg: #101315;
-  --sidebar: #161b1e;
-  --panel: #1b2226;
-  --panel-raised: #252d31;
-  --panel-inset: #14191c;
-  --line: #354047;
-  --line-strong: #5b6971;
-  --text: #eef2f3;
-  --muted: #a7b1b6;
-  --faint: #748087;
-  --cyan: #66d1df;
-  --green: #72ca93;
-  --amber: #e2b85d;
-  --red: #ee7d7d;
+  --bg: #f2f4f1;
+  --sidebar: #ffffff;
+  --panel: #ffffff;
+  --panel-raised: #e9ede9;
+  --panel-inset: #f8faf8;
+  --line: #d4dbd5;
+  --line-strong: #9fac9f;
+  --text: #171b18;
+  --muted: #677069;
+  --faint: #7c857e;
+  --cyan: #2e6ea6;
+  --green: #3c8c59;
+  --amber: #b87518;
+  --red: #b64343;
   --agent: var(--cyan);
   --skill: var(--green);
   --mcp: var(--amber);
   --radius: 6px;
   font-family: "Aptos", "Segoe UI Variable", "Segoe UI", sans-serif;
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 * {
@@ -60,7 +60,7 @@ button {
 
 button:hover:not(:disabled) {
   border-color: var(--line-strong);
-  background: #292f33;
+  background: #dde5de;
 }
 
 button:focus-visible,
@@ -201,7 +201,7 @@ p {
   gap: 16px;
   padding: 0 14px;
   border-bottom: 1px solid var(--line);
-  background: #14191b;
+  background: #ffffff;
 }
 
 .brand-block,
@@ -1424,7 +1424,7 @@ p {
   padding: 8px 10px;
   border-bottom: 1px solid var(--line);
   color: var(--muted);
-  background: #181e21;
+  background: var(--surface-subtle, #e9ede9);
 }
 
 .flow-debug-panel > div {
@@ -1450,19 +1450,19 @@ p {
 }
 
 .flow-debug-panel.success {
-  color: #bce9ce;
-  background: #1a2a22;
+  color: #1d6840;
+  background: #e5f3e9;
 }
 
 .flow-debug-panel.error,
 .flow-debug-panel.danger {
-  color: #ffd0d0;
-  background: #2b1e20;
+  color: #9e3030;
+  background: #fae9e8;
 }
 
 .flow-debug-panel.running {
-  color: #c5edf2;
-  background: #1a292d;
+  color: #245f90;
+  background: #e7f0f7;
 }
 
 .canvas-toolbar {
@@ -1490,7 +1490,7 @@ p {
   position: relative;
   overflow: hidden;
   cursor: grab;
-  background: #15191b;
+  background: #f2f4f1;
 }
 
 .flow-canvas.panning {
@@ -1518,20 +1518,20 @@ p {
   border: 1px solid var(--line-strong);
   border-radius: 6px;
   color: var(--text);
-  background: #202529;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.25);
+  background: #ffffff;
+  box-shadow: 0 2px 5px rgba(23, 27, 24, 0.12);
 }
 
 .flow-canvas .drawflow .drawflow-node.selected {
   border-color: var(--cyan);
-  background: #223136;
-  box-shadow: 0 0 0 2px rgba(102, 209, 223, 0.24), 0 4px 8px rgba(0, 0, 0, 0.3);
+  background: #f4f8fb;
+  box-shadow: 0 0 0 2px rgba(46, 110, 166, 0.18), 0 2px 5px rgba(23, 27, 24, 0.12);
 }
 
 .flow-canvas .drawflow .drawflow-node.flow-invalid {
   border-color: var(--red);
-  background: #352124;
-  box-shadow: 0 0 0 2px rgba(238, 125, 125, 0.22), 0 4px 8px rgba(0, 0, 0, 0.3);
+  background: #fff3f2;
+  box-shadow: 0 0 0 2px rgba(182, 67, 67, 0.18), 0 2px 5px rgba(23, 27, 24, 0.12);
 }
 
 .flow-canvas .drawflow .drawflow-node.agent {
@@ -1594,7 +1594,7 @@ p {
   width: 14px;
   height: 14px;
   border: 2px solid var(--cyan);
-  background: #141719;
+  background: #ffffff;
 }
 
 .flow-canvas .drawflow .drawflow-node .input {
@@ -1654,8 +1654,21 @@ p {
   padding: 6px;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius);
-  background: #191d20;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.28);
+  background: #ffffff;
+  box-shadow: 0 2px 7px rgba(23, 27, 24, 0.14);
+}
+
+.run-goal-field {
+  display: grid;
+  grid-template-columns: auto minmax(180px, 260px);
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.run-goal-field input {
+  min-height: 28px;
 }
 
 .details-body {
@@ -1685,7 +1698,7 @@ p {
   padding: 7px;
   border: 1px solid var(--line);
   border-radius: 4px;
-  background: #191d20;
+  background: var(--panel-inset);
 }
 
 .kv span {
@@ -1740,7 +1753,7 @@ p {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   border-top: 1px solid var(--line);
-  background: #171a1c;
+  background: var(--panel);
 }
 
 .flow-run-fields {
@@ -1748,7 +1761,7 @@ p {
   gap: 8px;
   padding: 9px 10px;
   border-bottom: 1px solid var(--line);
-  background: #181e21;
+  background: var(--panel-inset);
 }
 
 .flow-run-fields textarea {
@@ -1784,7 +1797,7 @@ p {
   padding: 7px 10px;
   border-top: 1px solid var(--line);
   color: var(--muted);
-  background: #191c1f;
+  background: var(--panel-raised);
   font-size: 10px;
 }
 
